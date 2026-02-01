@@ -295,104 +295,170 @@ for param_name, param_values in analysis_config.items():
 # ==========================================
 # 3. Sensitivity analysis visualization (fixed plotting errors)
 # ==========================================
-print("\n===== Plotting Sensitivity Analysis Chart (Paper Style) =====")
+# ==========================================
+# 3. Sensitivity analysis visualization (Journal Quality Edition)
+# ==========================================
+print("\n===== Plotting High-Quality Sensitivity Analysis Chart =====")
 
-# Set plotting style
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams['font.family'] = 'Arial'  # Use Arial font for English labels
-plt.rcParams['font.size'] = 11
-plt.rcParams['axes.titlesize'] = 13
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['xtick.labelsize'] = 10
-plt.rcParams['ytick.labelsize'] = 10
-plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.dpi'] = 400
-plt.rcParams['savefig.dpi'] = 400
+# --- 1. Global Style Settings (Academic Standard) ---
+import matplotlib.ticker as ticker
 
-# Create 2×2 subplots
-fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=False, sharey=False)
-fig.suptitle("Sensitivity Analysis of EV Battery Closed-Loop Supply Chain (2025)",
-             fontsize=14, fontweight='bold', y=0.98)
+# Use Times New Roman for a professional look
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 14,
+    'xtick.labelsize': 11,
+    'ytick.labelsize': 11,
+    'legend.fontsize': 11,
+    'figure.titlesize': 16,
+    'mathtext.fontset': 'stix',  # LaTeX-like math font
+    'axes.linewidth': 1.0,
+    'xtick.direction': 'in',
+    'ytick.direction': 'in',
+})
 
-# Color scheme (Science journal style)
-colors = ['#d62728', '#1f77b4', '#2ca02c', '#ff7f0e']
+# Create canvas with constrained layout for perfect spacing
+fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+# Global Title
+fig.suptitle(r"$\bf{Sensitivity\ Analysis\ of\ EV\ Battery\ Closed}$-$\bf{Loop\ Supply\ Chain\ (2025)}$",
+             y=1.03, fontsize=18)
 
-# Parameter names and display labels (English version)
+# --- 2. Configuration Mappings ---
+# Parameter labels with Math notation
 param_labels = {
-    'carbon_tax': 'Carbon Tax (CNY/ton CO₂)',
-    'alpha': 'Recovery Rate (α)',
-    'carbon_cap': 'Carbon Cap (10⁶ tons CO₂)',
-    'capacity': 'Recycler Capacity (10⁴ units/year)'
+    'carbon_tax': r'Carbon Tax ($C_{tax}$)' + '\n(CNY/ton)',
+    'alpha': r'Recovery Rate ($\alpha$)',
+    'carbon_cap': r'Carbon Cap ($E_{cap}$)' + '\n($10^6$ tons)',
+    'capacity': r'Recycler Capacity ($Cap$)' + '\n($10^4$ units/yr)'
 }
 
-# Unit conversion (convert CNY to 10⁴ CNY)
-unit_factor = 1e4
+# Unit conversion factors
+cost_factor = 1e4  # Convert to 10,000 CNY
+capacity_factor = 1e4  # Display x-axis for capacity in 10,000s
+cap_factor = 1e6  # Display x-axis for carbon cap in millions
 
-# Plot each subplot
+# Professional Color Palette (Deep colors for lines, Pastels for bars)
+line_colors = ['#00468B', '#ED0000', '#009944', '#420042']  # Blue, Red, Green, Deep Purple
+bar_color = '#B0C4DE'  # Light Steel Blue for facility counts
+
+# --- 3. Plotting Loop ---
 for idx, (param_name, results) in enumerate(sensitivity_results.items()):
-    ax = axes.flat[idx]
+    ax1 = axes.flat[idx]
 
-    # Filter out nan values
+    # Data Preparation
     valid_results = [r for r in results if not np.isnan(r['total_cost'])]
-    if not valid_results:
-        continue
+    if not valid_results: continue
 
     values = [item['value'] for item in valid_results]
-    costs = [item['total_cost'] / unit_factor for item in valid_results]
-    changes = [item['cost_change'] for item in valid_results]
+    costs = [item['total_cost'] / cost_factor for item in valid_results]
+    num_recyclers = [len(item['recyclers_built']) for item in valid_results]
 
-    # Plot main curve
-    ax.plot(values, costs, 'o-', color=colors[idx], linewidth=2.2, markersize=8,
-            markerfacecolor='white', markeredgewidth=1.5, zorder=5)
+    # Scale x-axis values for display if necessary
+    display_values = values[:]
+    if param_name == 'carbon_cap':
+        display_values = [v / cap_factor for v in values]
+    elif param_name == 'capacity':
+        display_values = [v / capacity_factor for v in values]
 
-    # Title and axis labels
-    ax.set_title(f"Sensitivity to {param_labels[param_name]}", fontsize=13, pad=10)
-    ax.set_xlabel(param_labels[param_name], fontsize=12)
-    ax.set_ylabel("Total Cost (10⁴ CNY)", fontsize=12)
+    # --- Dual Axis Plotting ---
 
-    # Grid and border optimization
-    ax.grid(True, linestyle='--', alpha=0.3, zorder=0)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    # Right Axis: Number of Recyclers (Bar Chart) - plotted first to be in background
+    ax2 = ax1.twinx()
+    # Add a slight margin to bars
+    width = (max(display_values) - min(display_values)) / len(display_values) * 0.4
+    bars = ax2.bar(display_values, num_recyclers, width=width, color=bar_color, alpha=0.35,
+                   label='No. of Facilities', zorder=1)
 
-    # Add change rate labels (removed arrows to avoid StopIteration error)
-    for x, y, ch in zip(values, costs, changes):
-        if not np.isnan(ch):
-            offset_y = 0.02 * (max(costs) - min(costs)) if ch > 0 else -0.02 * (max(costs) - min(costs))
-            ax.text(x, y + offset_y, f"{ch:+.1f}%", fontsize=9, color=colors[idx],
-                    ha='center', va='bottom' if ch > 0 else 'top')
+    # Left Axis: Total Cost (Line Chart) - plotted second to be on top
+    # Line style: Smooth solid line with distinct markers
+    line = ax1.plot(display_values, costs, marker='o', markersize=8, linewidth=2.5,
+                    color=line_colors[idx], markerfacecolor='white', markeredgewidth=2,
+                    label='Total Cost', zorder=10)
 
-    # Highlight baseline point
+    # --- 4. Refined Formatting ---
+
+    # Axis Limits & Ticks
+    # Force integer ticks for Recycler Count
+    ax2.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    ax2.set_ylim(0, max(num_recyclers) + 2)  # Give some headroom
+
+    # Labels
+    ax1.set_xlabel(param_labels[param_name], fontweight='bold')
+    ax1.set_ylabel(r"Total Cost ($10^4$ CNY)", color=line_colors[idx], fontweight='bold')
+    ax2.set_ylabel("No. of Established Recyclers", color='#5F7D95', fontsize=11, rotation=270, labelpad=15)
+
+    # Title
+    letters = ['(a)', '(b)', '(c)', '(d)']
+    ax1.set_title(f"{letters[idx]} Sensitivity to {param_name.replace('_', ' ').title()}",
+                  loc='left', fontsize=14, fontweight='bold', pad=10)
+
+    # Grid (Only for Left Axis)
+    ax1.grid(True, which='major', linestyle='--', alpha=0.5, color='gray')
+    ax1.grid(False, axis='x')  # Remove vertical grid to reduce clutter
+
+    # Spines
+    ax1.spines['top'].set_visible(False)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['bottom'].set_visible(False)
+    ax2.spines['right'].set_visible(False)  # Hide right spine line but keep ticks
+
+    # Colorize Axis Ticks to match data
+    ax1.tick_params(axis='y', colors=line_colors[idx])
+    ax2.tick_params(axis='y', colors='#5F7D95')
+
+    # --- 5. Smart Annotations (Baseline & Changes) ---
+
+    # Highlight Baseline
+    base_val = base_params[param_name]
+    # Convert base_val to display scale
+    if param_name == 'carbon_cap':
+        disp_base = base_val / cap_factor
+    elif param_name == 'capacity':
+        disp_base = base_val / capacity_factor
+    else:
+        disp_base = base_val
+
+    # Find baseline cost
     try:
-        base_idx = [i for i, r in enumerate(valid_results) if r['value'] == base_params[param_name]][0]
-        ax.plot(values[base_idx], costs[base_idx], marker='*', markersize=14, color='red',
-                markeredgecolor='black', zorder=15, label='Baseline')
-        ax.legend(frameon=True, edgecolor='lightgray', facecolor='white', loc='best')
-    except:
+        base_cost_y = [c for v, c in zip(display_values, costs) if np.isclose(v, disp_base)][0]
+
+        # Draw dashed lines for baseline
+        ax1.axvline(x=disp_base, color='gray', linestyle=':', linewidth=1.5, zorder=5)
+        ax1.scatter([disp_base], [base_cost_y], color=line_colors[idx], s=150, marker='*',
+                    zorder=20, label='Baseline', edgecolors='k')
+
+        # Annotate Baseline Value
+        if idx == 0:  # Only legend in first plot or create custom legend
+            # Create a combined legend for the first subplot
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='best',
+                       frameon=True, framealpha=0.9, fancybox=True, shadow=True)
+    except IndexError:
         pass
 
-# Adjust layout and save
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig("sensitivity_analysis_paper.png", dpi=400, bbox_inches='tight', format='png')
-print("Sensitivity analysis chart saved as sensitivity_analysis_paper.png (400 DPI)")
+    # Annotate Percent Changes (Only for min and max to reduce clutter)
+    for i in [0, -1]:
+        val = display_values[i]
+        cost = costs[i]
+
+        # Find original result to get % change
+        orig_res = [r for r in valid_results if np.isclose(r['value'], values[i])][0]
+        chg = orig_res['cost_change']
+
+        if not np.isnan(chg) and abs(chg) > 0.1:
+            # Add a text box
+            box_props = dict(boxstyle="round,pad=0.3", fc="white", ec=line_colors[idx], alpha=0.9)
+            txt = f"{chg:+.1f}%"
+            ax1.annotate(txt, xy=(val, cost), xytext=(0, 15 if chg > 0 else -15),
+                         textcoords='offset points', ha='center', fontsize=9,
+                         color=line_colors[idx], bbox=box_props, fontweight='bold', zorder=25)
+
+# Save high-res figure
+output_file = "sensitivity_analysis_journal_quality.png"
+plt.savefig(output_file, dpi=600, bbox_inches='tight', facecolor='white')
+print(f"Chart saved successfully: {output_file} (600 DPI)")
 plt.show()
-
-# ==========================================
-# 4. Formatted output of summary table
-# ==========================================
-print("\n===== Sensitivity Analysis Results Summary Table =====")
-print(f"{'Parameter':<15} {'Value':<12} {'Total Cost (10⁴ CNY)':<20} {'Cost Change Rate (%)':<20} {'Built Recyclers':<40} {'Carbon Cost (10⁴ CNY)':<20}")
-print("-" * 130)
-
-for param_name, results in sensitivity_results.items():
-    for res in results:
-        total_cost_wan = res['total_cost'] / unit_factor if not np.isnan(res['total_cost']) else "N/A"
-        carbon_cost_wan = res['carbon_cost'] / unit_factor if not np.isnan(res['carbon_cost']) else "N/A"
-        recyclers = ', '.join([r.replace('R_', '') for r in res['recyclers_built']]) if res['recyclers_built'] else "N/A"
-        cost_change = f"{res['cost_change']:.2f}" if not np.isnan(res['cost_change']) else "N/A"
-
-        # Formatted output
-        if isinstance(total_cost_wan, float):
-            print(f"{param_name:<15} {res['value']:<12} {total_cost_wan:<20.2f} {cost_change:<20} {recyclers:<40} {carbon_cost_wan:<20.2f}")
-        else:
-            print(f"{param_name:<15} {res['value']:<12} {total_cost_wan:<20} {cost_change:<20} {recyclers:<40} {carbon_cost_wan:<20}")
