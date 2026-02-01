@@ -239,40 +239,57 @@ kde_cost = gaussian_kde(costs_10k_cny)
 x_cost = np.linspace(min(costs_10k_cny)*0.98, max(costs_10k_cny)*1.02, 1000)
 y_cost = kde_cost(x_cost)
 
-# 1. Plot Density (Green theme for finance/sustainability)
-# Gradient fill effect (simulated by multiple fill_betweens or just a solid nice color)
-ax2.plot(x_cost, y_cost, color='#009944', linewidth=2.5, label='Predictive Dist.')
-ax2.fill_between(x_cost, 0, y_cost, color='#009944', alpha=0.2)
+# 核心：定义「视觉下移幅度」（控制y轴刻度和密度图的相对位置）
+visual_shift = 0.0006  # 数值越大，下移越多；需保证 max(y_cost) - visual_shift > 0
 
-# 2. Add "Rug Plot" at bottom to show sample density
-ax2.scatter(costs_10k_cny[:300], np.zeros(300)-0.002, marker='|', color='#009944', alpha=0.5, s=10)
+# 1. 绘制密度曲线+填充（视觉上下移，实际密度值仍为正）
+ax2.plot(x_cost, y_cost - visual_shift, color='#009944', linewidth=2.5, label='Predictive Dist.')
+ax2.fill_between(x_cost, 0 - visual_shift, y_cost - visual_shift, color='#009944', alpha=0.2)
 
-# 3. Statistics Box (Professional annotation)
+# 2. Rug Plot（贴合下移后的密度图底部）
+ax2.scatter(costs_10k_cny[:300], np.zeros(300) - visual_shift - 0.0002,
+            marker='|', color='#009944', alpha=0.5, s=5)
+
+# 3. 统计框（保持原位）
 cost_mean = np.mean(costs_10k_cny)
 cost_std = np.std(costs_10k_cny)
 stats_text = (f"$\mathbf{{Statistics}}$\n"
               f"Mean: {cost_mean:,.0f}\n"
               f"Std:  {cost_std:,.0f}\n"
               f"HDI$_{{95\%}}$: [{np.percentile(costs_10k_cny, 2.5):,.0f}, {np.percentile(costs_10k_cny, 97.5):,.0f}]")
-
 props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray')
 ax2.text(0.95, 0.95, stats_text, transform=ax2.transAxes, fontsize=10,
          verticalalignment='top', horizontalalignment='right', bbox=props)
 
-# 4. Highlight Baseline Cost
+# 4. 基线标注（同步视觉下移）
 base_cost_val = 77874.24
 ax2.axvline(base_cost_val, color='#ED0000', linestyle='--', linewidth=1.5)
-ax2.text(base_cost_val, max(y_cost)*1.02, 'Baseline', color='#ED0000', ha='center', fontsize=10)
+ax2.text(base_cost_val, (max(y_cost) * 1.02) - visual_shift,
+         'Baseline', color='#ED0000', ha='center', fontsize=10)
 
-# Styling Ax2
+# 5. 坐标轴样式（刻度与密度图同步下移，且密度值为正）
 ax2.set_xlabel(r'Total Cost ($10^4$ CNY)')
 ax2.set_ylabel('Probability Density')
 ax2.set_title('(b) Posterior Predictive Distribution of Total Cost', loc='left', fontweight='bold', pad=10)
-# Format x-axis with commas
 ax2.xaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
+
+# 调整y轴范围：适配视觉下移，同时保证密度图为正
+y_min = -visual_shift - 0.0005  # 下限略低于Rug Plot
+y_max = max(y_cost) * 1.1       # 上限保持足够空间
+ax2.set_ylim(y_min, y_max)
+
+# 核心：调整y轴刻度（显示「实际密度值」，且与密度图同步下移）
+# 1. 获取原始非负刻度
+original_yticks = [tick for tick in ax2.get_yticks() if tick >= 0]
+# 2. 生成「视觉下移后的刻度位置」
+new_ytick_positions = [tick - visual_shift for tick in original_yticks]
+# 3. 设置刻度位置，并显示「实际密度值」（保证刻度标签为正）
+ax2.set_yticks(new_ytick_positions)
+ax2.set_yticklabels([f"{tick + visual_shift:.4f}" for tick in new_ytick_positions])
+
+# 隐藏多余轴线
 ax2.spines['top'].set_visible(False)
 ax2.spines['right'].set_visible(False)
-
 # Save
 output_filename = 'journal_quality_bayesian_analysis.png'
 plt.savefig(output_filename, dpi=600, bbox_inches='tight')
