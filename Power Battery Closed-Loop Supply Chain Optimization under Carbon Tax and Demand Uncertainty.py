@@ -229,94 +229,147 @@ else:
 # ==========================================
 # 4. 结果可视化（Science风格，贴合学术/工业展示）
 # ==========================================
-print("\n正在绘制工业级网络图...")
+# ... (保留上面所有的 Import, 数据准备, 模型构建, 求解部分) ...
 
-# 绘图配置（Science风格）
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams['font.family'] = 'Arial'
-plt.rcParams['font.size'] = 12
-plt.rcParams['axes.titlesize'] = 14
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.dpi'] = 300
+# ==========================================
+# 4. 结果可视化（期刊发表级优化版）
+# ==========================================
+import matplotlib.patheffects as pe  # 用于文字描边，提升可读性
+import matplotlib.lines as mlines  # 用于自定义图例
+
+print("\n正在绘制期刊级网络图...")
+
+# --- 1. 样式配置 (学术风格) ---
+plt.style.use('default')  # 重置为默认，避免seaborn样式干扰
+plt.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],  # 优先使用Arial
+    'font.size': 12,
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'figure.dpi': 300,
+    'mathtext.fontset': 'stix',  # 数学公式字体类似Times
+})
 
 # 创建画布
-fig, ax = plt.subplots(figsize=(12, 9), dpi=300)
+fig, ax = plt.subplots(figsize=(14, 10))
 
-# 标题（包含核心信息）
-total_cost_m = pulp.value(prob.objective) / 1e6 if pulp.LpStatus[status] == 'Optimal' else 0
-ax.set_title(f"Optimal EV Battery Closed-Loop Supply Chain Network (2025 Industrial Reality)\n"
-             f"Total Cost: {total_cost_m:.2f} Million CNY | Recyclers Built: {len(built_recyclers)}",
-             fontsize=14, pad=20, weight='bold')
+# --- 2. 绘制基础地理框架 ---
+# 设置近似Mercator投影的纵横比 (中国维度约为1.1-1.2)
+ax.set_aspect(1.1)
+# 淡化网格，仅作为参考
+ax.grid(True, linestyle=':', color='gray', alpha=0.3, zorder=0)
+# 设置背景色为极淡的灰色，突出前景
+ax.set_facecolor('#FAFAFA')
 
-# 网格配置
-ax.grid(True, linestyle='--', alpha=0.3, zorder=0)
+# --- 3. 绘制物流连线 (Edges) ---
+# 定义最大流量以便归一化线宽
+max_flow_fwd = max([pulp.value(x_vars[i][j]) for i in factories for j in markets] + [1])
+max_flow_rev = max([pulp.value(z_vars[j][k]) for j in markets for k in candidates] + [1])
 
-# 绘制工厂（红色方块，国家级生产基地）
-for f in factories:
-    pos = locations[f]
-    ax.scatter(pos[1], pos[0], c='#d62728', marker='s', s=180, edgecolor='black', linewidth=1.2,
-               label='Factory' if f == factories[0] else "", zorder=10)
-    ax.text(pos[1] + 0.15, pos[0] + 0.15, f.replace('F_', ''), fontsize=10, fontweight='bold', color='darkred')
-
-# 绘制市场（蓝色圆点，核心消费城市）
-for m in markets:
-    pos = locations[m]
-    ax.scatter(pos[1], pos[0], c='#1f77b4', marker='o', s=140, edgecolor='white', linewidth=1.2,
-               label='Market' if m == markets[0] else "", zorder=10)
-    ax.text(pos[1] + 0.15, pos[0], m.replace('M_', ''), fontsize=10, color='navy')
-
-# 绘制回收中心（绿色三角=已建，灰色叉=未建）
-legend_built = legend_unbuilt = False
-for k in candidates:
-    pos = locations[k]
-    if pulp.value(y_vars[k]) > 0.5:
-        ax.scatter(pos[1], pos[0], c='#2ca02c', marker='^', s=220, edgecolor='black', linewidth=1.2,
-                   label='Built Recycler' if not legend_built else "", zorder=12)
-        legend_built = True
-        ax.text(pos[1] + 0.15, pos[0] - 0.4, k.replace('R_', ''), fontsize=10, fontweight='bold', color='darkgreen')
-    else:
-        ax.scatter(pos[1], pos[0], c='gray', marker='x', s=140, linewidth=2.5,
-                   label='Unused Candidate' if not legend_unbuilt else "", zorder=8)
-        legend_unbuilt = True
-        ax.text(pos[1] + 0.15, pos[0] - 0.3, k.replace('R_', ''), fontsize=9, color='dimgray')
-
-# 绘制正向物流（红色实线，宽度=流量/25000）
+# 正向物流 (F -> M): 实线，渐变色或纯色
 for i in factories:
     for j in markets:
         val = pulp.value(x_vars[i][j])
-        if val > 0:
-            p1 = locations[i]
-            p2 = locations[j]
-            width = max(0.8, val / 25000)
-            ax.plot([p1[1], p2[1]], [p1[0], p2[0]], c='#d62728', alpha=0.6, linewidth=width,
-                    solid_capstyle='round', zorder=3)
+        if val > 1e-3:  # 忽略极小值
+            p1, p2 = locations[i], locations[j]
+            # 线宽映射：最小1.0，最大4.5
+            lw = 1.0 + (val / max_flow_fwd) * 3.5
+            ax.plot([p1[1], p2[1]], [p1[0], p2[0]],
+                    c='#B22222', alpha=0.5, linewidth=lw, solid_capstyle='round', zorder=2)
 
-# 绘制逆向物流（绿色虚线，宽度=流量/20000）
+# 逆向物流 (M -> R): 虚线
 for j in markets:
     for k in candidates:
         val = pulp.value(z_vars[j][k])
-        if val > 0:
-            p1 = locations[j]
-            p2 = locations[k]
-            width = max(0.6, val / 20000)
-            ax.plot([p1[1], p2[1]], [p1[0], p2[0]], c='#2ca02c', alpha=0.5, linewidth=width,
-                    linestyle='--', dashes=(5, 3), zorder=4)
+        if val > 1e-3:
+            p1, p2 = locations[j], locations[k]
+            lw = 1.0 + (val / max_flow_rev) * 3.5
+            # 使用 dense dotted line
+            ax.plot([p1[1], p2[1]], [p1[0], p2[0]],
+                    c='#228B22', alpha=0.6, linewidth=lw, linestyle=(0, (3, 1.5)), zorder=3)
 
-# 坐标轴标签
-ax.set_xlabel("Longitude (°E)", fontsize=12)
-ax.set_ylabel("Latitude (°N)", fontsize=12)
 
-# 图例配置
-ax.legend(loc='upper right', frameon=True, edgecolor='gray', facecolor='white',
-          bbox_to_anchor=(1.02, 1.0), fontsize=10)
+# --- 4. 绘制节点 (Nodes) ---
+# 辅助函数：绘制带描边的文字
+def plot_text(x, y, text, color, offset_y=0):
+    txt = ax.text(x, y + offset_y, text, fontsize=10, fontweight='bold', color=color,
+                  ha='center', va='center', zorder=20)
+    txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground='white')])
 
-# 自适应布局
-ax.set_aspect('auto')
+
+# 4.1 工厂 (Factories) - 红色方块
+for f in factories:
+    pos = locations[f]
+    ax.scatter(pos[1], pos[0], c='#D73027', marker='s', s=250, edgecolors='k', linewidth=1.5, zorder=10)
+    plot_text(pos[1], pos[0], f.replace('F_', ''), '#8B0000', offset_y=0.6)
+
+# 4.2 市场 (Markets) - 蓝色圆圈
+for m in markets:
+    pos = locations[m]
+    # 市场大小略微区别，或者保持一致
+    ax.scatter(pos[1], pos[0], c='#4575B4', marker='o', s=180, edgecolors='white', linewidth=1.5, zorder=10)
+    plot_text(pos[1], pos[0], m.replace('M_', ''), '#2C5BB4', offset_y=-0.5)
+
+# 4.3 回收中心 (Recyclers) - 绿色三角 (选中) / 灰色X (未选)
+built_count = 0
+for k in candidates:
+    pos = locations[k]
+    is_built = pulp.value(y_vars[k]) > 0.5
+    if is_built:
+        built_count += 1
+        ax.scatter(pos[1], pos[0], c='#1A9850', marker='^', s=300, edgecolors='k', linewidth=1.5, zorder=15)
+        plot_text(pos[1], pos[0], k.replace('R_', ''), '#006400', offset_y=0.7)
+    else:
+        ax.scatter(pos[1], pos[0], c='#BDBDBD', marker='X', s=120, linewidth=2, zorder=5)
+        # 未选中的仅显示较小的灰色文字
+        txt = ax.text(pos[1], pos[0] - 0.4, k.replace('R_', ''), fontsize=8, color='gray', ha='center', zorder=5)
+        txt.set_path_effects([pe.withStroke(linewidth=1.5, foreground='white')])
+
+# --- 5. 图例与装饰 (关键优化) ---
+
+# 构建自定义图例句柄 (更加专业)
+legend_elements = [
+    # 节点分类
+    mlines.Line2D([], [], color='#D73027', marker='s', linestyle='None', markersize=10, label='Battery Factory'),
+    mlines.Line2D([], [], color='#4575B4', marker='o', linestyle='None', markersize=9, label='Consumer Market'),
+    mlines.Line2D([], [], color='#1A9850', marker='^', linestyle='None', markersize=11, label='Selected Recycler'),
+    mlines.Line2D([], [], color='#BDBDBD', marker='X', linestyle='None', markersize=8, label='Candidate (Not Built)'),
+
+    # 空行分割
+    mlines.Line2D([], [], color='none', label=''),
+
+    # 连线含义
+    mlines.Line2D([], [], color='#B22222', linewidth=2, label='Forward Flow (Products)'),
+    mlines.Line2D([], [], color='#228B22', linewidth=2, linestyle='--', label='Reverse Flow (Used Batteries)'),
+
+    # 流量粗细说明
+    mlines.Line2D([], [], color='gray', linewidth=1, label='Low Volume'),
+    mlines.Line2D([], [], color='gray', linewidth=4, label='High Volume'),
+]
+
+ax.legend(handles=legend_elements, loc='lower right', frameon=True, fancybox=False,
+          edgecolor='black', shadow=False, fontsize=10, bbox_to_anchor=(1.0, 0.02))
+
+# 标题与标签
+total_cost_m = pulp.value(prob.objective) / 1e6 if pulp.LpStatus[status] == 'Optimal' else 0
+title_str = (f"Optimized CLSC Network for EV Batteries (2025 Scenario)\n"
+             f"Total Cost: ¥{total_cost_m:.2f} Million | Recyclers Established: {built_count}/7")
+ax.set_title(title_str, pad=20, fontweight='bold')
+ax.set_xlabel("Longitude (°E)")
+ax.set_ylabel("Latitude (°N)")
+
+# 坐标轴范围微调 (留出边距)
+x_vals = [pos[1] for pos in locations.values()]
+y_vals = [pos[0] for pos in locations.values()]
+ax.set_xlim(min(x_vals) - 2, max(x_vals) + 2)
+ax.set_ylim(min(y_vals) - 2, max(y_vals) + 2)
+
+# 移除上方和右侧的边框线 (Despine)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
 plt.tight_layout()
-
-# 保存图片（400DPI，贴合期刊要求）
-plt.savefig("ev_battery_network_2025_industrial_reality.png", dpi=400, bbox_inches='tight', format='png')
-print("工业级网络图已保存为 ev_battery_network_2025_industrial_reality.png (400 DPI)")
-
-# 显示图片
+plt.savefig("paper_ready_network_plot.png", dpi=600, bbox_inches='tight')
+print("图片已保存: paper_ready_network_plot.png (600 DPI - 期刊高标准)")
+plt.show()
