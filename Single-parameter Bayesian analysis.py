@@ -152,110 +152,131 @@ base_params = {
 # Run Bayesian CLSC simulation
 total_costs_bayes, recyclers_bayes = bayesian_clsc_simulation(posterior_samples, base_params, n_sim=1000)
 
-# ====================== 5. Visualization (Paper-Style, Full English Legend) ======================
-print("\n===== Plotting Bayesian Analysis Figures (Paper Style, 400 DPI) =====")
+# ====================== 5. Visualization (Journal Quality Edition) ======================
+import matplotlib.patheffects as pe # 用于文字描边，增强对比度
+import matplotlib.ticker as ticker
 
-# Set academic journal style (Science/Nature standard)
-plt.style.use('seaborn-v0_8-whitegrid')
-plt.rcParams['font.family'] = 'Arial'  # Most common font for English academic papers
-plt.rcParams['font.size'] = 11
-plt.rcParams['axes.titlesize'] = 13
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['xtick.labelsize'] = 10
-plt.rcParams['ytick.labelsize'] = 10
-plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.dpi'] = 400
-plt.rcParams['savefig.dpi'] = 400
+print("\n===== Plotting High-Quality Bayesian Analysis Figures =====")
 
-# Create 1x2 subplots (Prior/Posterior of α | Posterior Predictive of Total Cost)
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), dpi=400)
-# Global title (Fit EV battery CLSC research topic)
-fig.suptitle("Bayesian Analysis of Recovery Rate α and Total Cost in EV Battery CLSC Network",
-             fontsize=14, fontweight='bold', y=0.98)
+# --- 1. Global Style Settings (Academic Standard) ---
+# Reset default params to avoid conflicts
+plt.rcParams.update(plt.rcParamsDefault)
 
-# 5.1 Left Ax: Prior/Posterior Distribution of Recovery Rate α
-# KDE smooth curve
+# Use high-quality fonts and layout settings
+plt.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    'mathtext.fontset': 'stix',      # Professional math font (similar to Times)
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 14,
+    'xtick.labelsize': 11,
+    'ytick.labelsize': 11,
+    'legend.fontsize': 11,
+    'figure.titlesize': 16,
+    'axes.linewidth': 1.0,           # Thinner axis lines
+    'lines.linewidth': 2.0,
+    'figure.dpi': 300,
+    'savefig.dpi': 600,              # Print quality
+    'axes.prop_cycle': plt.cycler(color=['#00468B', '#ED0000', '#42B540', '#0099B4']) # Science Journal Colors
+})
+
+# Create canvas: 1x2 layout with distinct spacing
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6.5), constrained_layout=True)
+
+# Global Title (Bold and structured)
+fig.suptitle(r"$\bf{Bayesian\ Inference\ of\ Recovery\ Rate\ (\alpha)\ and\ Cost\ Uncertainty\ in\ CLSC}$",
+             fontsize=18, y=1.05)
+
+# --- Subplot 1: Prior vs Posterior (The Learning Process) ---
+
+# Data prep
+x_grid = np.linspace(0, 0.6, 1000) # Refined grid
 kde_prior = gaussian_kde(prior_samples)
 kde_post = gaussian_kde(posterior_samples)
-x_grid = np.linspace(0, 1, 500)
+y_prior = kde_prior(x_grid)
+y_post = kde_post(x_grid)
 
-# Plot prior/posterior curve
-ax1.plot(x_grid, kde_prior(x_grid), color='#1f77b4', lw=2.2, label='Prior Distribution (Beta)')
-ax1.plot(x_grid, kde_post(x_grid), color='#ff7f0e', lw=2.2, label='Posterior Distribution (MCMC)')
+# 1. Plot Prior (Subtle, gray/blue, dashed)
+ax1.plot(x_grid, y_prior, color='#7F97A2', linestyle='--', linewidth=2, label='Prior Belief\n(Beta Dist.)')
+ax1.fill_between(x_grid, 0, y_prior, color='#7F97A2', alpha=0.15)
 
-# Overlay histogram (enhance readability)
-ax1.hist(prior_samples, bins=50, alpha=0.25, density=True, color='#1f77b4', edgecolor='none')
-ax1.hist(posterior_samples, bins=50, alpha=0.35, density=True, color='#ff7f0e', edgecolor='none')
+# 2. Plot Posterior (Strong, deep blue, solid)
+ax1.plot(x_grid, y_post, color='#00468B', linewidth=2.5, label='Posterior Evidence\n(MCMC Samples)')
+ax1.fill_between(x_grid, 0, y_post, color='#00468B', alpha=0.25)
 
-# Baseline α=0.28 (policy target, Match paper)
-ax1.axvline(0.28, color='red', linestyle='--', lw=1.8, label='Baseline α = 0.28 (Policy Target)')
+# 3. Highlight Baseline (Red line)
+ax1.axvline(0.28, color='#ED0000', linestyle=':', linewidth=2, alpha=0.8, zorder=5)
+ax1.text(0.282, max(y_post)*0.95, ' Baseline\n Target\n (0.28)', color='#ED0000', fontsize=10, va='top')
 
-# 95% Highest Density Interval (HDI) shadow (Bayesian uncertainty representation)
+# 4. Mark 95% HDI on the Posterior curve
 hdi_low = np.percentile(posterior_samples, 2.5)
 hdi_high = np.percentile(posterior_samples, 97.5)
-ax1.fill_between(x_grid, 0, kde_post(x_grid), where=(x_grid >= hdi_low) & (x_grid <= hdi_high),
-                 color='#ff7f0e', alpha=0.15, label='95% HDI (Highest Density Interval)')
+# Shade the HDI area strongly
+ax1.fill_between(x_grid, 0, y_post, where=(x_grid >= hdi_low) & (x_grid <= hdi_high),
+                 color='#00468B', alpha=0.4, label='95% HDI')
 
-# Axes setting (Full English)
-ax1.set_xlabel('Recovery Rate α', fontsize=12)
-ax1.set_ylabel('Probability Density', fontsize=12)
-ax1.set_xlim(0, 0.6)  # Focus on core interval (0~0.6, fit paper's sensitivity range)
-ax1.legend(frameon=True, edgecolor='lightgray', loc='upper right')
-# Remove top/right spines (academic paper style)
+# Annotate Mean directly
+post_mean = np.mean(posterior_samples)
+ax1.scatter([post_mean], [kde_post(post_mean)], color='white', edgecolor='#00468B', s=60, zorder=10)
+ax1.annotate(f'$\mu_{{post}}={post_mean:.3f}$', xy=(post_mean, kde_post(post_mean)),
+             xytext=(20, 10), textcoords='offset points', color='#00468B', fontweight='bold')
+
+# Styling Ax1
+ax1.set_xlabel(r'Recovery Rate ($\alpha$)')
+ax1.set_ylabel('Probability Density')
+ax1.set_title('(a) Bayesian Updating of Recovery Rate', loc='left', fontweight='bold', pad=10)
+ax1.set_xlim(0.1, 0.5)
+ax1.legend(loc='upper left', frameon=False, fontsize=10)
 ax1.spines['top'].set_visible(False)
 ax1.spines['right'].set_visible(False)
 
-# 5.2 Right Ax: Posterior Predictive Distribution of Total Cost
-# Convert to ten thousand CNY (Match paper's unit)
+# --- Subplot 2: Posterior Predictive Cost (The Risk Analysis) ---
+
+# Data prep
 costs_10k_cny = total_costs_bayes / 1e4
 kde_cost = gaussian_kde(costs_10k_cny)
-x_cost = np.linspace(min(costs_10k_cny), max(costs_10k_cny), 500)
+x_cost = np.linspace(min(costs_10k_cny)*0.98, max(costs_10k_cny)*1.02, 1000)
+y_cost = kde_cost(x_cost)
 
-# Plot total cost distribution
-ax2.plot(x_cost, kde_cost(x_cost), color='#2ca02c', lw=2.2, label='Posterior Predictive Distribution')
-ax2.hist(costs_10k_cny, bins=50, alpha=0.4, density=True, color='#2ca02c', edgecolor='none')
+# 1. Plot Density (Green theme for finance/sustainability)
+# Gradient fill effect (simulated by multiple fill_betweens or just a solid nice color)
+ax2.plot(x_cost, y_cost, color='#009944', linewidth=2.5, label='Predictive Dist.')
+ax2.fill_between(x_cost, 0, y_cost, color='#009944', alpha=0.2)
 
-# Baseline total cost: 77,874.24 ten thousand CNY (Match paper's sensitivity analysis)
-ax2.axvline(77874.24, color='red', linestyle='--', lw=1.8, label='Baseline Cost: 77,874.24 ×10⁴ CNY')
+# 2. Add "Rug Plot" at bottom to show sample density
+ax2.scatter(costs_10k_cny[:300], np.zeros(300)-0.002, marker='|', color='#009944', alpha=0.5, s=10)
 
-# 95% HDI shadow for total cost
-cost_hdi_low = np.percentile(costs_10k_cny, 2.5)
-cost_hdi_high = np.percentile(costs_10k_cny, 97.5)
-ax2.fill_between(x_cost, 0, kde_cost(x_cost), where=(x_cost >= cost_hdi_low) & (x_cost <= cost_hdi_high),
-                 color='#2ca02c', alpha=0.15, label='95% HDI (Highest Density Interval)')
+# 3. Statistics Box (Professional annotation)
+cost_mean = np.mean(costs_10k_cny)
+cost_std = np.std(costs_10k_cny)
+stats_text = (f"$\mathbf{{Statistics}}$\n"
+              f"Mean: {cost_mean:,.0f}\n"
+              f"Std:  {cost_std:,.0f}\n"
+              f"HDI$_{{95\%}}$: [{np.percentile(costs_10k_cny, 2.5):,.0f}, {np.percentile(costs_10k_cny, 97.5):,.0f}]")
 
-# Axes setting (Full English)
-ax2.set_xlabel('Total Cost (×10⁴ CNY)', fontsize=12)
-ax2.set_ylabel('Density', fontsize=12)
-ax2.legend(frameon=True, edgecolor='lightgray', loc='upper right')
-# Remove top/right spines
+props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray')
+ax2.text(0.95, 0.95, stats_text, transform=ax2.transAxes, fontsize=10,
+         verticalalignment='top', horizontalalignment='right', bbox=props)
+
+# 4. Highlight Baseline Cost
+base_cost_val = 77874.24
+ax2.axvline(base_cost_val, color='#ED0000', linestyle='--', linewidth=1.5)
+ax2.text(base_cost_val, max(y_cost)*1.02, 'Baseline', color='#ED0000', ha='center', fontsize=10)
+
+# Styling Ax2
+ax2.set_xlabel(r'Total Cost ($10^4$ CNY)')
+ax2.set_ylabel('Probability Density')
+ax2.set_title('(b) Posterior Predictive Distribution of Total Cost', loc='left', fontweight='bold', pad=10)
+# Format x-axis with commas
+ax2.xaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
 ax2.spines['top'].set_visible(False)
 ax2.spines['right'].set_visible(False)
 
-# Layout adjustment and save (Paper style, tight bbox)
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig('bayesian_analysis_ev_battery_clsc.png', dpi=400, bbox_inches='tight', format='png')
-print("Bayesian analysis figure saved as: bayesian_analysis_ev_battery_clsc.png (400 DPI)")
+# Save
+output_filename = 'journal_quality_bayesian_analysis.png'
+plt.savefig(output_filename, dpi=600, bbox_inches='tight')
+print(f"Figure saved successfully as: {output_filename} (600 DPI)")
 
-# ====================== 6. Result Output (Full English, Match Paper's Format) ======================
-print("\n=== Bayesian Posterior Statistics of Recovery Rate α ===")
-print(f"Posterior Mean: {np.mean(posterior_samples):.4f}")
-print(f"Posterior Median: {np.median(posterior_samples):.4f}")
-print(f"95% Highest Density Interval (HDI): [{np.percentile(posterior_samples, 2.5):.4f}, {np.percentile(posterior_samples, 97.5):.4f}]")
-
-print("\n=== Bayesian CLSC Simulation Results (2025 Industry Calibration) ===")
-print(f"Mean Total Cost: {np.mean(costs_10k_cny):.2f} ×10⁴ CNY")
-cost_ci_low = np.percentile(costs_10k_cny, 2.5)
-cost_ci_high = np.percentile(costs_10k_cny, 97.5)
-print(f"95% HDI of Total Cost: [{cost_ci_low:.2f}, {cost_ci_high:.2f}] ×10⁴ CNY")
-
-# Recycler hub combination probability
-recyclers_counts = {}
-for recyclers in recyclers_bayes:
-    recyclers_counts[recyclers] = recyclers_counts.get(recyclers, 0) + 1
-print("\nRecycling Hub Location Probability:")
-for combo, count in recyclers_counts.items():
-    print(f"  Hub Combination: {combo} | Probability: {count / len(recyclers_bayes) * 100:.2f}%")
-
-# Show plot
+# Show
 plt.show()
