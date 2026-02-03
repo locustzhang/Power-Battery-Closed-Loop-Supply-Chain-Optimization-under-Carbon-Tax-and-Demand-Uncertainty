@@ -1,299 +1,367 @@
-import numpy as np
+"""
+50 Cities EV Battery CLSC: Bayesian Uncertainty Analysis (Journal Quality Edition)
+==================================================================================
+Method: Exact Mixed-Integer Linear Programming (MILP) embedded in Metropolis-Hastings MCMC
+Optimization: 50 Cities | 22 Candidates | Robust Parameters
+"""
+
+import pulp
+import math
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from matplotlib.patches import Rectangle
+import pandas as pd
+import numpy as np
+import time
 from scipy.stats import beta, norm, gaussian_kde
 import warnings
+import sys
+import random  # 导入Python内置random包，用于设置其种子
 
-warnings.filterwarnings('ignore')  # Suppress irrelevant warnings
+# Suppress warnings for clean output
+warnings.filterwarnings('ignore')
 
-# ====================== 1. Basic Configuration (2025 Industry Calibration, Match Paper) ======================
-# Baseline demand (12 core markets, standardized battery pack units, Match Table 1 in paper)
-demand_base = {
-    'M_Beijing': 48500,
-    'M_Shanghai': 49500,
-    'M_Guangzhou': 46200,
-    'M_Chengdu': 51600,
-    'M_Shenzhen': 50100,
-    'M_Hangzhou': 51200,
-    'M_Zhengzhou': 39600,
-    'M_XiAn': 37600,
-    'M_Chongqing': 36700,
-    'M_Tianjin': 33300,
-    'M_Wuhan': 35000,
-    'M_Changsha': 31700
-}
-# Demand uncertainty (20% fluctuation, Match Assumption 2 in paper)
-demand_uncertainty = {k: v * 0.20 for k, v in demand_base.items()}
-# Simulate observed data (Baseline α=0.28, Match paper's recovery rate policy target)
-observed_data = {k: v * 0.28 + np.random.normal(0, v * 0.05) for k, v in demand_base.items()}
+# ==========================================
+# 新增：设置固定随机种子（保证结果可复现，学术论文必备）
+# ==========================================
+SEED = 42  # 可自定义（如123、666等），固定即可
+np.random.seed(SEED)  # 设置numpy随机种子
+random.seed(SEED)     # 设置Python内置random随机种子
 
-# ====================== 2. CLSC Model Solver (Fully Match Paper's Formulation & Constraints) ======================
-def solve_model(params):
-    """
-    Closed-Loop Supply Chain (CLSC) model solver for EV battery recycling network
-    Match paper's objective function, constraints and 2025 calibrated parameters
-    Params: dict with keys [carbon_tax, alpha, carbon_cap, capacity]
-    Returns: dict with [total_cost, recyclers_built, status]
-    Constraints considered: 600km logistics radius, carbon cap, recovery rate, capacity limit
-    """
-    carbon_tax = params['carbon_tax']    # 65 CNY/ton CO2 (Match Table 2 in paper)
-    alpha = params['alpha']              # Baseline 0.28 (policy target)
-    carbon_cap = params['carbon_cap']    # 1,500,000 ton CO2 (Match Table 2)
-    capacity = params['capacity']        # 40,000 ton/year (Match Assumption 3)
-
-    # Baseline total cost: 778,742,400 CNY (77,874.24 ten thousand CNY, Match paper's sensitivity analysis)
-    base_cost = 778742400.0
-    total_cost = base_cost
-
-    # 1. Carbon tax: No impact (Match paper's conclusion: emissions far below cap, no excess tax)
-    total_cost += (carbon_tax - 65) * 0
-
-    # 2. Recovery rate α: Threshold effect (0.28, Match paper's sensitivity analysis)
-    # α ≤ 0.28: 4 hubs (Hefei, Zhengzhou, Guiyang, Changsha) | α > 0.28: add Nanchang
-    if alpha <= 0.28:
-        cost_delta = (alpha - 0.28) * 80000000  # Gentle change (Match -3.38% at α=0.20)
-        recyclers_built = ['Hefei', 'Zhengzhou', 'Guiyang', 'Changsha']
-    else:
-        cost_delta = (alpha - 0.28) * 1400000000  # Step jump (Match +6.96% at α=0.32, +12.00% at α=0.36)
-        recyclers_built = ['Hefei', 'Zhengzhou', 'Guiyang', 'Changsha', 'Nanchang']
-
-    # 3. Carbon cap: No impact (Match paper's conclusion: 140,511 ton CO2 << 1,500,000 ton cap)
-    total_cost -= (carbon_cap - 1500000) * 0
-
-    # 4. Recycling capacity: U-shaped cost curve (Match paper's sensitivity analysis)
-    # Capacity < 40,000: add Nanchang | Capacity ≥ 40,000: marginal benefit diminishes
-    if capacity < 40000:
-        total_cost += (40000 - capacity) * 1200  # +5.50% at 28,000 ton/year
-        recyclers_built = ['Hefei', 'Zhengzhou', 'Guiyang', 'Changsha', 'Nanchang']
-    else:
-        total_cost -= (capacity - 40000) * 50    # -0.25% at >40,000 ton/year (marginal benefit ≈ 0)
-
-    # Add 1% random fluctuation (Fit Bayesian uncertainty simulation)
-    total_cost += np.random.normal(0, total_cost * 0.01)
-
-    return {
-        'total_cost': total_cost,
-        'recyclers_built': recyclers_built,
-        'status': 'Optimal'
-    }
-
-# ====================== 3. Bayesian Core Logic (Focus on Recovery Rate α) ======================
-# 3.1 Prior distribution for α (Beta distribution: 0~1, fit recovery rate characteristic)
-# Prior mean ≈ 0.3 (close to baseline 0.28, Match paper's policy target)
-alpha_prior = 3
-beta_prior = 7
-prior_samples = np.random.beta(alpha_prior, beta_prior, size=10000)
-
-# 3.2 Likelihood function (Log form to avoid underflow)
-def calculate_likelihood(alpha, observed_data, demand_base, demand_uncertainty):
-    log_likelihood = 0
-    for market in demand_base.keys():
-        mu = demand_base[market] * alpha  # Mean = baseline demand × recovery rate
-        sigma = demand_uncertainty[market] * alpha  # Std = demand uncertainty × recovery rate
-        # Normal likelihood (Match paper's robust demand constraint)
-        log_likelihood += -0.5 * np.log(2 * np.pi * sigma ** 2) - (observed_data[market] - mu) ** 2 / (2 * sigma ** 2)
-    return log_likelihood
-
-# 3.3 Metropolis MCMC Sampler (Core of Bayesian posterior inference)
-def metropolis_sampler(n_samples, initial_alpha, step_size):
-    samples = [initial_alpha]
-    current_alpha = initial_alpha
-    # Initial log probability (Prior + Likelihood)
-    current_log_prob = calculate_likelihood(current_alpha, observed_data, demand_base, demand_uncertainty) + \
-                       np.log(beta.pdf(current_alpha, alpha_prior, beta_prior))
-
-    for _ in range(n_samples):
-        # Proposal distribution: Normal distribution
-        proposal_alpha = np.random.normal(current_alpha, step_size)
-        if 0 < proposal_alpha < 1:  # Recovery rate ∈ (0,1) (practical constraint)
-            proposal_log_prob = calculate_likelihood(proposal_alpha, observed_data, demand_base, demand_uncertainty) + \
-                                np.log(beta.pdf(proposal_alpha, alpha_prior, beta_prior))
-            # Acceptance probability
-            accept_prob = min(1, np.exp(proposal_log_prob - current_log_prob))
-            if np.random.uniform(0, 1) < accept_prob:
-                current_alpha = proposal_alpha
-                current_log_prob = proposal_log_prob
-        samples.append(current_alpha)
-
-    # Burn-in: Discard first 10% samples (eliminate initial bias)
-    burn_in = int(n_samples * 0.1)
-    return np.array(samples[burn_in:])
-
-# Run MCMC sampling (10,000 iterations, initial value = baseline α=0.28)
-posterior_samples = metropolis_sampler(n_samples=10000, initial_alpha=0.28, step_size=0.01)
-
-# ====================== 4. Bayesian-Driven CLSC Simulation ======================
-def bayesian_clsc_simulation(posterior_samples, base_params, n_sim=1000):
-    """
-    CLSC simulation based on posterior samples of α
-    Returns: total_costs (array), recyclers_list (list of hub combinations)
-    """
-    total_costs = []
-    recyclers_list = []
-    # Random sample α from posterior distribution
-    sample_alphas = np.random.choice(posterior_samples, size=n_sim)
-
-    for alpha in sample_alphas:
-        test_params = base_params.copy()
-        test_params['alpha'] = alpha
-        res = solve_model(test_params)
-        if res['status'] == 'Optimal':
-            total_costs.append(res['total_cost'])
-            recyclers_list.append(','.join(res['recyclers_built']))
-
-    return np.array(total_costs), recyclers_list
-
-# Baseline parameters (Fully match paper's 2025 industry calibration, Table 2)
-base_params = {
-    'carbon_tax': 65,        # 65 CNY/ton CO2
-    'alpha': 0.28,           # Baseline recovery rate
-    'carbon_cap': 1500000,   # 1.5 million ton CO2
-    'capacity': 40000        # 40,000 ton/year per hub
-}
-# Run Bayesian CLSC simulation
-total_costs_bayes, recyclers_bayes = bayesian_clsc_simulation(posterior_samples, base_params, n_sim=1000)
-
-# ====================== 5. Visualization (Journal Quality Edition) ======================
-import matplotlib.patheffects as pe # 用于文字描边，增强对比度
-import matplotlib.ticker as ticker
-
-print("\n===== Plotting High-Quality Bayesian Analysis Figures =====")
-
-# --- 1. Global Style Settings (Academic Standard) ---
-# Reset default params to avoid conflicts
-plt.rcParams.update(plt.rcParamsDefault)
-
-# Use high-quality fonts and layout settings
+# ==========================================
+# 0. Global Configuration (Academic Style)
+# ==========================================
 plt.rcParams.update({
     'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
-    'mathtext.fontset': 'stix',      # Professional math font (similar to Times)
-    'font.size': 12,
-    'axes.labelsize': 14,
+    'font.sans-serif': ['Arial', 'DejaVu Sans'],
+    'font.size': 11,
     'axes.titlesize': 14,
-    'xtick.labelsize': 11,
-    'ytick.labelsize': 11,
-    'legend.fontsize': 11,
-    'figure.titlesize': 16,
-    'axes.linewidth': 1.0,           # Thinner axis lines
-    'lines.linewidth': 2.0,
-    'figure.dpi': 300,
-    'savefig.dpi': 600,              # Print quality
-    'axes.prop_cycle': plt.cycler(color=['#00468B', '#ED0000', '#42B540', '#0099B4']) # Science Journal Colors
+    'axes.labelsize': 12,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'legend.fontsize': 10,
+    'figure.dpi': 150,
+    'savefig.dpi': 600,
+    'mathtext.fontset': 'stix', # LaTeX-like math font
+    'axes.spines.top': False,
+    'axes.spines.right': False,
 })
 
-# Create canvas: 1x2 layout with distinct spacing
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6.5), constrained_layout=True)
+# Academic Color Palette
+COLORS = {
+    'prior_fill': '#A6CEE3',    # Light Blue
+    'prior_line': '#1F78B4',    # Dark Blue
+    'post_fill': '#FB9A99',     # Light Red
+    'post_line': '#E31A1C',     # Dark Red
+    'truth': '#33A02C',         # Green
+    'ci_shade': '#E31A1C',      # Red Shade for HDI
+    'grid': '#E0E0E0'
+}
 
-# Global Title (Bold and structured)
-fig.suptitle(r"$\bf{Bayesian\ Inference\ of\ Recovery\ Rate\ (\alpha)\ and\ Cost\ Uncertainty\ in\ CLSC}$",
-             fontsize=18, y=1.05)
+# ==========================================
+# 1. Data Preparation (50 Cities - Consistent)
+# ==========================================
+print("="*70)
+print("  50 CITIES CLSC NETWORK: BAYESIAN INFERENCE (EXACT MILP)")
+print("="*70)
 
-# --- Subplot 1: Prior vs Posterior (The Learning Process) ---
+# Parameters (Matched with previous 50-city model)
+NATIONAL_SALES_TOTAL = 12866000
+TOTAL_RETIRED_BATTERY = 820000
+UNIT_BATTERY_WEIGHT = 0.5
+TOTAL_UNITS_NATIONAL = TOTAL_RETIRED_BATTERY / UNIT_BATTERY_WEIGHT
 
-# Data prep
-x_grid = np.linspace(0, 0.6, 1000) # Refined grid
-kde_prior = gaussian_kde(prior_samples)
-kde_post = gaussian_kde(posterior_samples)
-y_prior = kde_prior(x_grid)
-y_post = kde_post(x_grid)
+# 50 Cities Weights
+city_sales_weight = [
+    ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
+    ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
+    ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
+    ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
+    ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
+    ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
+    ("Shenyang", 0.363), ("Nanning", 0.337), ("Taiyuan", 0.315), ("Kunming", 0.309),
+    ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
+    ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
+    ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
+    ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
+    ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
+    ("Zhongshan", 0.198), ("Jiaxing", 0.197)
+]
 
-# 1. Plot Prior (Subtle, gray/blue, dashed)
-ax1.plot(x_grid, y_prior, color='#7F97A2', linestyle='--', linewidth=2, label='Prior Belief\n(Beta Dist.)')
-ax1.fill_between(x_grid, 0, y_prior, color='#7F97A2', alpha=0.15)
+# Coordinates
+city_coords = {
+    "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
+    "Shanghai": (31.23, 121.47), "Beijing": (39.90, 116.40), "Guangzhou": (23.13, 113.26),
+    "Zhengzhou": (34.76, 113.65), "Chongqing": (29.56, 106.55), "XiAn": (34.34, 108.94),
+    "Tianjin": (39.13, 117.20), "Wuhan": (30.59, 114.30), "Suzhou": (31.30, 120.58),
+    "Hefei": (31.82, 117.22), "Wuxi": (31.57, 120.30), "Ningbo": (29.82, 121.55),
+    "Dongguan": (23.05, 113.75), "Nanjing": (32.05, 118.78), "Changsha": (28.23, 112.94),
+    "Wenzhou": (28.00, 120.70), "Shijiazhuang": (38.04, 114.51), "Jinan": (36.65, 117.12),
+    "Foshan": (23.02, 113.12), "Qingdao": (36.07, 120.38), "Changchun": (43.88, 125.32),
+    "Shenyang": (41.80, 123.43), "Nanning": (22.82, 108.32), "Taiyuan": (37.87, 112.55),
+    "Kunming": (25.04, 102.71), "Linyi": (35.05, 118.35), "Taizhou": (28.66, 121.42),
+    "Jinhua": (29.08, 119.65), "Xuzhou": (34.26, 117.28), "Haikou": (20.02, 110.35),
+    "Jining": (35.42, 116.59), "Xiamen": (24.48, 118.08), "Baoding": (38.87, 115.48),
+    "Nanchang": (28.68, 115.86), "Changzhou": (31.78, 119.95), "Guiyang": (26.64, 106.63),
+    "Luoyang": (34.62, 112.45), "Tangshan": (39.63, 118.18), "Nantong": (32.01, 120.86),
+    "Haerbin": (45.80, 126.53), "Handan": (36.61, 114.49), "Weifang": (36.71, 119.16),
+    "Wulumuqi": (43.83, 87.62), "Quanzhou": (24.87, 118.68), "Fuzhou": (26.08, 119.30),
+    "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
+}
 
-# 2. Plot Posterior (Strong, deep blue, solid)
-ax1.plot(x_grid, y_post, color='#00468B', linewidth=2.5, label='Posterior Evidence\n(MCMC Samples)')
-ax1.fill_between(x_grid, 0, y_post, color='#00468B', alpha=0.25)
+# 22 Recyclers
+recycler_config = [
+    ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
+    ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
+    ("Wuhan", (30.59, 114.30), 5800), ("Yibin", (28.77, 104.63), 7000),
+    ("Nanchang", (28.68, 115.86), 5500), ("Xian", (34.34, 108.94), 5600),
+    ("Tianjin", (39.13, 117.20), 5700), ("Nanjing", (32.05, 118.78), 5900),
+    ("Hangzhou", (30.27, 120.15), 6000), ("Changchun", (43.88, 125.32), 4800),
+    ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),
+    ("Qingdao", (36.07, 120.38), 5400), ("Haerbin", (45.80, 126.53), 4600),
+    ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
+    ("Kunming", (25.04, 102.71), 4900), ("Wulumuqi", (43.83, 87.62), 4700),
+    ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
+]
 
-# 3. Highlight Baseline (Red line)
-ax1.axvline(0.28, color='#ED0000', linestyle=':', linewidth=2, alpha=0.8, zorder=5)
-ax1.text(0.282, max(y_post)*0.95, ' Baseline\n Target\n (0.28)', color='#ED0000', fontsize=10, va='top')
+# 6 Factories
+factory_config = [
+    ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
+    ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
+    ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
+]
 
-# 4. Mark 95% HDI on the Posterior curve
-hdi_low = np.percentile(posterior_samples, 2.5)
-hdi_high = np.percentile(posterior_samples, 97.5)
-# Shade the HDI area strongly
-ax1.fill_between(x_grid, 0, y_post, where=(x_grid >= hdi_low) & (x_grid <= hdi_high),
-                 color='#00468B', alpha=0.4, label='95% HDI')
+# Process Data
+total_weight = sum(w for _, w in city_sales_weight)
+sales_ratio = total_weight / len(city_sales_weight)
+actual_sales_50 = NATIONAL_SALES_TOTAL * sales_ratio
 
-# Annotate Mean directly
-post_mean = np.mean(posterior_samples)
-ax1.scatter([post_mean], [kde_post(post_mean)], color='white', edgecolor='#00468B', s=60, zorder=10)
-ax1.annotate(f'$\mu_{{post}}={post_mean:.3f}$', xy=(post_mean, kde_post(post_mean)),
-             xytext=(20, 10), textcoords='offset points', color='#00468B', fontweight='bold')
+markets, factories, candidates = [], [], []
+locations, city_demand = {}, {}
 
-# Styling Ax1
-ax1.set_xlabel(r'Recovery Rate ($\alpha$)')
-ax1.set_ylabel('Probability Density')
-ax1.set_title('(a) Bayesian Updating of Recovery Rate', loc='left', fontweight='bold', pad=10)
-ax1.set_xlim(0.1, 0.5)
-ax1.legend(loc='upper left', frameon=False, fontsize=10)
-ax1.spines['top'].set_visible(False)
-ax1.spines['right'].set_visible(False)
+for c, w in city_sales_weight:
+    city_demand[c] = int(TOTAL_UNITS_NATIONAL * (actual_sales_50 * (w/total_weight) / NATIONAL_SALES_TOTAL))
+    markets.append(f"M_{c}")
+    locations[f"M_{c}"] = city_coords[c]
 
-# --- Subplot 2: Posterior Predictive Cost (The Risk Analysis) ---
+for c, pos in factory_config:
+    factories.append(f"F_{c}")
+    locations[f"F_{c}"] = pos
 
-# Data prep
-costs_10k_cny = total_costs_bayes / 1e4
-kde_cost = gaussian_kde(costs_10k_cny)
-x_cost = np.linspace(min(costs_10k_cny)*0.98, max(costs_10k_cny)*1.02, 1000)
-y_cost = kde_cost(x_cost)
+for c, pos, cost in recycler_config:
+    candidates.append(f"R_{c}")
+    locations[f"R_{c}"] = pos
 
-# 核心：定义「视觉下移幅度」（控制y轴刻度和密度图的相对位置）
-visual_shift = 0.0006  # 数值越大，下移越多；需保证 max(y_cost) - visual_shift > 0
+fixed_cost = {f"R_{c}": cost * 10000 for c, _, cost in recycler_config}
+demand_base = {f"M_{c}": city_demand[c] for c, _ in city_sales_weight}
+demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}
 
-# 1. 绘制密度曲线+填充（视觉上下移，实际密度值仍为正）
-ax2.plot(x_cost, y_cost - visual_shift, color='#009944', linewidth=2.5, label='Predictive Dist.')
-ax2.fill_between(x_cost, 0 - visual_shift, y_cost - visual_shift, color='#009944', alpha=0.2)
+# ==========================================
+# 2. Solver Engine (Optimized for MCMC)
+# ==========================================
+def get_dist(n1, n2):
+    p1, p2 = locations[n1], locations[n2]
+    return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) * 100
 
-# 2. Rug Plot（贴合下移后的密度图底部）
-ax2.scatter(costs_10k_cny[:300], np.zeros(300) - visual_shift - 0.0002,
-            marker='|', color='#009944', alpha=0.5, s=5)
+def solve_milp(alpha, demand_dict=None, verbose=False):
+    """Core MILP solver with optional demand override"""
+    # Fixed Parameters (Matched with 50-city model)
+    TRANS_COST, CARBON_TAX = 1.6, 65
+    CARBON_FACTOR, CARBON_CAP = 0.0004, 1500000
+    CAPACITY, MAX_REV_DIST = 80000, 600
 
-# 3. 统计框（保持原位）
-cost_mean = np.mean(costs_10k_cny)
-cost_std = np.std(costs_10k_cny)
-stats_text = (f"$\mathbf{{Statistics}}$\n"
-              f"Mean: {cost_mean:,.0f}\n"
-              f"Std:  {cost_std:,.0f}\n"
-              f"HDI$_{{95\%}}$: [{np.percentile(costs_10k_cny, 2.5):,.0f}, {np.percentile(costs_10k_cny, 97.5):,.0f}]")
-props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray')
-ax2.text(0.95, 0.95, stats_text, transform=ax2.transAxes, fontsize=10,
-         verticalalignment='top', horizontalalignment='right', bbox=props)
+    prob = pulp.LpProblem("Bayes_MILP", pulp.LpMinimize)
 
-# 4. 基线标注（同步视觉下移）
-base_cost_val = 77874.24
-ax2.axvline(base_cost_val, color='#ED0000', linestyle='--', linewidth=1.5)
-ax2.text(base_cost_val, (max(y_cost) * 1.02) - visual_shift,
-         'Baseline', color='#ED0000', ha='center', fontsize=10)
+    # Vars
+    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')
+    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')
+    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')
+    excess_e = pulp.LpVariable("ExcessE", 0, cat='Continuous')
 
-# 5. 坐标轴样式（刻度与密度图同步下移，且密度值为正）
-ax2.set_xlabel(r'Total Cost ($10^4$ CNY)')
-ax2.set_ylabel('Probability Density')
-ax2.set_title('(b) Posterior Predictive Distribution of Total Cost', loc='left', fontweight='bold', pad=10)
-ax2.xaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
+    # Expressions
+    cost_trans = pulp.lpSum([x[i][j]*get_dist(i,j)*TRANS_COST for i in factories for j in markets]) + \
+                 pulp.lpSum([z[j][k]*get_dist(j,k)*TRANS_COST for j in markets for k in candidates])
 
-# 调整y轴范围：适配视觉下移，同时保证密度图为正
-y_min = -visual_shift - 0.0005  # 下限略低于Rug Plot
-y_max = max(y_cost) * 1.1       # 上限保持足够空间
-ax2.set_ylim(y_min, y_max)
+    emission = pulp.lpSum([x[i][j]*get_dist(i,j)*CARBON_FACTOR for i in factories for j in markets]) + \
+               pulp.lpSum([z[j][k]*get_dist(j,k)*CARBON_FACTOR for j in markets for k in candidates])
 
-# 核心：调整y轴刻度（显示「实际密度值」，且与密度图同步下移）
-# 1. 获取原始非负刻度
-original_yticks = [tick for tick in ax2.get_yticks() if tick >= 0]
-# 2. 生成「视觉下移后的刻度位置」
-new_ytick_positions = [tick - visual_shift for tick in original_yticks]
-# 3. 设置刻度位置，并显示「实际密度值」（保证刻度标签为正）
-ax2.set_yticks(new_ytick_positions)
-ax2.set_yticklabels([f"{tick + visual_shift:.4f}" for tick in new_ytick_positions])
+    cost_fixed = pulp.lpSum([fixed_cost[k]*y[k] for k in candidates])
 
-# 隐藏多余轴线
-ax2.spines['top'].set_visible(False)
-ax2.spines['right'].set_visible(False)
-# Save
-output_filename = 'journal_quality_bayesian_analysis.png'
-plt.savefig(output_filename, dpi=600, bbox_inches='tight')
-print(f"Figure saved successfully as: {output_filename} (600 DPI)")
+    prob += cost_fixed + cost_trans + excess_e*CARBON_TAX
 
-# Show
-plt.show()
+    # Constraints
+    prob += excess_e >= emission - CARBON_CAP
+
+    current_demand = demand_dict if demand_dict else demand_base
+
+    for j in markets:
+        prob += pulp.lpSum([x[i][j] for i in factories]) >= current_demand[j]
+        prob += pulp.lpSum([z[j][k] for k in candidates]) >= current_demand[j] * alpha
+        for k in candidates:
+            if get_dist(j, k) > MAX_REV_DIST: prob += z[j][k] == 0
+
+    for k in candidates:
+        prob += pulp.lpSum([z[j][k] for j in markets]) <= CAPACITY * y[k]
+
+    status = prob.solve(pulp.PULP_CBC_CMD(msg=verbose))
+
+    if pulp.LpStatus[status] == 'Optimal':
+        return {'status': 'Optimal', 'cost': pulp.value(prob.objective)}
+    else:
+        return {'status': 'Infeasible', 'cost': np.nan}
+
+# ==========================================
+# 3. Bayesian Logic (Optimized)
+# ==========================================
+class BayesianEngine:
+    def __init__(self, true_alpha=0.28):
+        self.true_alpha = true_alpha
+        self.obs_costs = []
+
+    def generate_observations(self, n=5):
+        print(f"\n[Generation] Creating {n} synthetic observations based on True α={self.true_alpha}...")
+        for i in range(n):
+            # Perturb demand by 5% noise
+            d_pert = {k: v * np.random.normal(1, 0.05) for k, v in demand_base.items()}
+            res = solve_milp(self.true_alpha, d_pert)
+            if res['status'] == 'Optimal':
+                self.obs_costs.append(res['cost'])
+            print(f"  -> Obs {i+1}: {res['cost']:,.0f} CNY")
+        self.obs_mean = np.mean(self.obs_costs)
+        self.obs_std = np.std(self.obs_costs)
+
+    def log_likelihood(self, alpha):
+        # Optimization: Don't resolve MILP 3 times.
+        # Solve once with mean demand to get expected cost trend.
+        res = solve_milp(alpha)
+        if res['status'] != 'Optimal': return -np.inf
+
+        # Assume Gaussian error around the model's predicted cost
+        pred_cost = res['cost']
+        # Likelihood: How likely is Observed Data given Predicted Cost?
+        return norm.logpdf(self.obs_mean, loc=pred_cost, scale=self.obs_std * 2.0)
+
+    def run_mcmc(self, samples=1000, burn=100):
+        print(f"\n[MCMC] Sampling {samples} points (Burn-in={burn})...")
+        print("  Note: Exact MILP is running in the loop. Please wait.")
+
+        chain = []
+        curr_alpha = 0.3 # Start point
+        curr_ll = self.log_likelihood(curr_alpha)
+        curr_prior = beta.logpdf(curr_alpha, 3, 7)
+
+        accepted = 0
+        start_t = time.time()
+
+        for i in range(samples + burn):
+            # Propose new alpha
+            prop_alpha = curr_alpha + np.random.normal(0, 0.02)
+            if prop_alpha <= 0.1 or prop_alpha >= 0.5:
+                prop_ll = -np.inf
+            else:
+                prop_ll = self.log_likelihood(prop_alpha)
+
+            prop_prior = beta.logpdf(prop_alpha, 3, 7) if 0<prop_alpha<1 else -np.inf
+
+            # Acceptance Ratio
+            if prop_ll > -np.inf:
+                ratio = (prop_ll + prop_prior) - (curr_ll + curr_prior)
+                if np.log(np.random.rand()) < ratio:
+                    curr_alpha = prop_alpha
+                    curr_ll = prop_ll
+                    curr_prior = prop_prior
+                    accepted += 1
+
+            if i >= burn:
+                chain.append(curr_alpha)
+
+            # Progress bar
+            if i % 5 == 0:
+                elapsed = time.time() - start_t
+                sys.stdout.write(f"\r  >> Iter {i}/{samples+burn} | Acc: {accepted/(i+1):.2%} | Alpha: {curr_alpha:.4f}")
+                sys.stdout.flush()
+
+        print(f"\n  ✓ Done. Total time: {time.time()-start_t:.1f}s")
+        return np.array(chain)
+
+# ==========================================
+# 4. Execution & Visualization
+# ==========================================
+# A. Run Analysis
+bayes = BayesianEngine(true_alpha=0.28)
+bayes.generate_observations(n=5) # Generate synthetic reality
+posterior = bayes.run_mcmc(samples=1000, burn=100) # Small sample for demo speed, increase for paper
+
+# B. Generate Priors for Plotting
+x_axis = np.linspace(0.1, 0.5, 200)
+y_prior = beta.pdf(x_axis, 3, 7)
+
+# C. Calculate Statistics
+post_mean = np.mean(posterior)
+hdi_low, hdi_high = np.percentile(posterior, [2.5, 97.5])
+
+# D. Plotting
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+
+# Plot 1: Parameter Estimation
+ax = axes[0]
+# Prior Curve
+ax.plot(x_axis, y_prior, color=COLORS['prior_line'], lw=2, linestyle='--', label='Prior Belief Beta(3,7)')
+ax.fill_between(x_axis, 0, y_prior, color=COLORS['prior_fill'], alpha=0.3)
+
+# Posterior KDE
+kde = gaussian_kde(posterior)
+y_post = kde(x_axis)
+ax.plot(x_axis, y_post, color=COLORS['post_line'], lw=2.5, label='Posterior Evidence')
+ax.fill_between(x_axis, 0, y_post, color=COLORS['post_fill'], alpha=0.4)
+
+# Annotations
+ax.axvline(0.28, color=COLORS['truth'], linestyle='-', lw=2, label='True α (0.28)')
+ax.axvline(post_mean, color=COLORS['post_line'], linestyle=':', lw=2)
+
+# HDI Shading
+x_hdi = np.linspace(hdi_low, hdi_high, 100)
+ax.fill_between(x_hdi, 0, kde(x_hdi), color=COLORS['ci_shade'], alpha=0.2, label='95% HDI')
+
+ax.set_title("Bayesian Updating of Recovery Rate (α)", fontweight='bold')
+ax.set_xlabel("Recovery Rate")
+ax.set_ylabel("Probability Density")
+ax.legend(loc='upper right', frameon=False)
+
+# Plot 2: Cost Risk Profile
+ax = axes[1]
+# Predict costs using posterior alphas
+pred_costs = []
+print("\n[Prediction] Generating predictive cost distribution...")
+for a in posterior[::5]: # Sample subset
+    res = solve_milp(a)
+    if res['status']=='Optimal': pred_costs.append(res['cost']/1e8)
+
+# Histogram + KDE
+ax.hist(pred_costs, bins=10, density=True, alpha=0.3, color='gray', edgecolor='white')
+if len(pred_costs) > 1:
+    kde_cost = gaussian_kde(pred_costs)
+    x_cost = np.linspace(min(pred_costs)*0.98, max(pred_costs)*1.02, 100)
+    ax.plot(x_cost, kde_cost(x_cost), color='#333333', lw=2)
+
+mean_cost = np.mean(pred_costs)
+ax.axvline(mean_cost, color=COLORS['post_line'], lw=2, linestyle='--', label=f'Exp. Cost: {mean_cost:.2f} HM')
+
+ax.set_title("Posterior Predictive Cost Distribution", fontweight='bold')
+ax.set_xlabel("Total Cost (Hundred Million CNY)")
+ax.legend(loc='upper right')
+
+# E. Save
+plt.savefig("50cities_bayesian_journal.png", bbox_inches='tight')
+print(f"\n[Output] Visualization saved to '50cities_bayesian_journal.png'")
+
+# F. Print Table
+print("\n" + "="*50)
+print(f"{'BAYESIAN INFERENCE STATISTICS':^50}")
+print("="*50)
+df_stats = pd.DataFrame({
+    'Metric': ['Mean Alpha', 'Median Alpha', '95% HDI Lower', '95% HDI Upper', 'Exp. Cost (HM)'],
+    'Value': [post_mean, np.median(posterior), hdi_low, hdi_high, mean_cost]
+})
+print(df_stats.to_string(index=False, float_format="%.4f"))
+print("-" * 50)
