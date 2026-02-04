@@ -185,92 +185,165 @@ if pulp.LpStatus[prob.status] == 'Optimal':
 # ==========================================
 # 4. 高水平期刊绘图 (严格维持原始逻辑)
 # ==========================================
-print("\n正在生成高分辨率网络图...")
-fig, ax = plt.subplots(figsize=(14, 12))
-ax.set_aspect(1.15)
-ax.set_facecolor('white')
-ax.grid(True, linestyle='--', color='#E0E0E0', alpha=0.5, zorder=0)
+# ==========================================
+# 4. 高水平期刊绘图 (深度优化版)
+# ==========================================
+print("\n正在生成出版级高分辨率网络图...")
 
+# 设置全局绘图风格
+plt.style.use('seaborn-v0_8-white')  # 使用简洁白底风格
+plt.rcParams.update({
+    'font.family': 'Arial',
+    'axes.linewidth': 1.5,
+    'xtick.major.width': 1.5,
+    'ytick.major.width': 1.5,
+    'xtick.direction': 'in',
+    'ytick.direction': 'in'
+})
+
+# 定义高级配色 (Science Style)
+STYLE_COLORS = {
+    'factory_fill': '#E64B35',  # 砖红
+    'factory_edge': '#3C5488',  # 深蓝边框
+    'recycler_fill': '#00A087',  # 翡翠绿
+    'recycler_halo': '#00A087',  # 浅绿光晕
+    'market_fill': '#4DBBD5',  # 天蓝
+    'fwd_line': '#E64B35',  # 正向物流色
+    'rev_line': '#00A087',  # 逆向物流色
+    'text': '#333333'  # 深灰字体
+}
+
+fig, ax = plt.subplots(figsize=(12, 10))  # 调整为更紧凑的比例
+ax.set_aspect(1.18)  # 调整纵横比以适应中国地图纬度视觉习惯
+
+# 计算最大流量用于归一化线宽
 max_flow_fwd = max([pulp.value(x[i][j]) for i in factories for j in markets] + [1])
 max_flow_rev = max([pulp.value(z[j][k]) for j in markets for k in candidates] + [1])
+max_demand = max(demand_base.values())
 
-# 绘制正向物流 (实线)
+# --- 1. 绘制物流网络 (线条) ---
+# 技巧：先画细线，再画粗线，避免重要信息被遮挡
+# 1.1 正向物流 (实线)
 for i in factories:
     for j in markets:
         val = pulp.value(x[i][j])
-        if val > 100:
+        if val > 100:  # 过滤极小流量
             p1, p2 = locations[i], locations[j]
-            alpha = 0.2 + (val / max_flow_fwd) * 0.8
-            lw = 0.5 + (val / max_flow_fwd) * 3.0
-            ax.plot([p1[1], p2[1]], [p1[0], p2[0]], c=COLORS['fwd_flow'], alpha=alpha, linewidth=lw, zorder=2)
+            norm_val = val / max_flow_fwd
+            # 动态调整透明度和线宽
+            alpha = 0.1 + norm_val * 0.8
+            lw = 0.5 + norm_val * 2.5
+            ax.plot([p1[1], p2[1]], [p1[0], p2[0]],
+                    c=STYLE_COLORS['fwd_line'], alpha=alpha, linewidth=lw,
+                    zorder=2, solid_capstyle='round')
 
-# 绘制逆向物流 (虚线)
+# 1.2 逆向物流 (虚线)
 for j in markets:
     for k in built_k:
         val = pulp.value(z[j][k])
         if val > 10:
             p1, p2 = locations[j], locations[k]
-            alpha = 0.3 + (val / max_flow_rev) * 0.7
-            lw = 0.5 + (val / max_flow_rev) * 3.0
-            ax.plot([p1[1], p2[1]], [p1[0], p2[0]], c=COLORS['rev_flow'], alpha=alpha, linewidth=lw, linestyle=':',
-                    dashes=(1, 1), zorder=3)
+            norm_val = val / max_flow_rev
+            alpha = 0.2 + norm_val * 0.7
+            lw = 0.8 + norm_val * 2.5
+            # 使用密集点线增加质感
+            ax.plot([p1[1], p2[1]], [p1[0], p2[0]],
+                    c=STYLE_COLORS['rev_line'], alpha=alpha, linewidth=lw,
+                    linestyle=(0, (1, 1.5)), zorder=3)  # 自定义虚线密度
 
 
-# 节点绘制函数
-def add_label(x, y, text, color, y_offset=0, size=9, weight='normal'):
-    txt = ax.text(x, y + y_offset, text, fontsize=size, fontweight=weight, color=color, ha='center', va='center',
-                  zorder=20)
-    txt.set_path_effects([pe.withStroke(linewidth=2, foreground='white')])
+# --- 2. 绘制节点 (气泡与图标) ---
+
+# 标签辅助函数 (带白色描边，防重叠)
+def add_smart_label(pos, text, color, size=9, weight='bold', dy=0):
+    txt = ax.text(pos[1], pos[0] + dy, text,
+                  fontsize=size, fontweight=weight, color=color,
+                  ha='center', va='center', zorder=50)
+    txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground='white', alpha=0.9)])
 
 
-# 绘制工厂
-for f in factories:
-    pos = locations[f]
-    ax.scatter(pos[1], pos[0], c=COLORS['factory'], marker='s', s=180, edgecolors='k', lw=1, zorder=10)
-    add_label(pos[1], pos[0], f.replace('F_', ''), COLORS['factory'], 0.7, 10, 'bold')
+# 2.1 消费市场 (气泡图)
+# 区分：已建回收中心的城市和其他城市
+built_cities = [k.replace('R_', '') for k in built_k]
+factory_cities = [f.replace('F_', '') for f in factories]
 
-# 绘制回收中心及辐射半径
+for m in markets:
+    city_name = m.replace('M_', '')
+    pos = locations[m]
+    # 气泡大小与需求量挂钩
+    size = 20 + (demand_base[m] / max_demand) * 150
+
+    # 只有非工厂、非回收中心的市场才显示蓝色气泡
+    if city_name not in built_cities and city_name not in factory_cities:
+        ax.scatter(pos[1], pos[0], s=size, c=STYLE_COLORS['market_fill'],
+                   alpha=0.6, edgecolors='white', lw=0.5, zorder=4)
+        # 仅标注 Top 10 市场
+        if demand_base[m] > sorted(demand_base.values(), reverse=True)[12]:
+            add_smart_label(pos, city_name, STYLE_COLORS['text'], size=8, weight='normal', dy=-0.4)
+
+# 2.2 回收中心 (带辐射范围)
 for k in built_k:
     pos = locations[k]
-    ax.scatter(pos[1], pos[0], c=COLORS['recycler'], marker='^', s=220, edgecolors='k', lw=1, zorder=15)
-    add_label(pos[1], pos[0], k.replace('R_', ''), '#004d26', -0.7, 10, 'bold')
-    circle = plt.Circle((pos[1], pos[0]), 6.0, fill=True, color=COLORS['radius'], alpha=0.05, linestyle='--',
-                        linewidth=0.5, ec=COLORS['radius'], zorder=1)
+    # 辐射半径 (柔和填充)
+    circle = plt.Circle((pos[1], pos[0]), 6.0, color=STYLE_COLORS['recycler_halo'],
+                        alpha=0.15, zorder=1, linewidth=0)
     ax.add_patch(circle)
+    # 辐射边界 (虚线)
+    circle_edge = plt.Circle((pos[1], pos[0]), 6.0, fill=False, edgecolor=STYLE_COLORS['recycler_halo'],
+                             linestyle='--', linewidth=0.8, alpha=0.6, zorder=1)
+    ax.add_patch(circle_edge)
 
-# 绘制市场 (Top 12)
-sorted_markets = sorted(demand_base.items(), key=lambda item: item[1], reverse=True)
-top_markets = [k for k, v in sorted_markets[:12]]
-for m in markets:
-    pos = locations[m]
-    size = 30 + (demand_base[m] / max(demand_base.values())) * 120
-    if m in top_markets:
-        ax.scatter(pos[1], pos[0], c=COLORS['market'], marker='o', s=size, edgecolors='white', lw=0.5, zorder=5)
-        if m.replace('M_', '') not in [k.replace('R_', '') for k in built_k] and m.replace('M_', '') not in [
-            f.replace('F_', '') for f in factories]:
-            add_label(pos[1], pos[0], m.replace('M_', ''), COLORS['market'], -0.5, 8)
-    else:
-        ax.scatter(pos[1], pos[0], c=COLORS['market'], marker='o', s=size, alpha=0.5, edgecolors='none', zorder=4)
+    # 节点图标 (三角形)
+    ax.scatter(pos[1], pos[0], c=STYLE_COLORS['recycler_fill'], marker='^', s=200,
+               edgecolors='white', lw=1.5, zorder=20, label='_nolegend_')
+    add_smart_label(pos, k.replace('R_', ''), '#006655', size=10, weight='bold', dy=-0.6)
 
-# 图例与装饰
-legend_handles = [
-    mlines.Line2D([], [], color=COLORS['factory'], marker='s', linestyle='None', markersize=10,
-                  label='Battery Factory'),
-    mlines.Line2D([], [], color=COLORS['market'], marker='o', linestyle='None', markersize=8, label='Consumer Market'),
-    mlines.Line2D([], [], color=COLORS['recycler'], marker='^', linestyle='None', markersize=10,
-                  label='Established Recycler'),
-    mlines.Line2D([], [], color=COLORS['radius'], marker='o', linestyle='None', markersize=15, alpha=0.2,
-                  label='600km Service Radius'),
-    mlines.Line2D([], [], color=COLORS['fwd_flow'], lw=2, label='Forward Logistics'),
-    mlines.Line2D([], [], color=COLORS['rev_flow'], lw=2, linestyle=':', label='Reverse Logistics'),
+# 2.3 电池工厂 (方块)
+for f in factories:
+    pos = locations[f]
+    ax.scatter(pos[1], pos[0], c=STYLE_COLORS['factory_fill'], marker='s', s=180,
+               edgecolors='white', lw=1.5, zorder=15)
+    add_smart_label(pos, f.replace('F_', ''), '#8B0000', size=10, weight='bold', dy=0.6)
+
+# --- 3. 图饰与布局优化 ---
+
+# 自定义图例 (更加整洁)
+legend_elements = [
+    mlines.Line2D([], [], color=STYLE_COLORS['factory_fill'], marker='s', linestyle='None',
+                  markersize=10, label='Battery Factory'),
+    mlines.Line2D([], [], color=STYLE_COLORS['recycler_fill'], marker='^', linestyle='None',
+                  markersize=10, label='Recycling Center'),
+    mlines.Line2D([], [], color=STYLE_COLORS['market_fill'], marker='o', linestyle='None',
+                  markersize=8, alpha=0.7, label='Market Demand'),
+    mlines.Line2D([], [], color=STYLE_COLORS['recycler_halo'], marker='o', linestyle='None',
+                  markersize=15, alpha=0.3, label='600km Service Radius'),
+    mlines.Line2D([], [], color=STYLE_COLORS['fwd_line'], lw=2, label='Forward Flow (Proportional)'),
+    mlines.Line2D([], [], color=STYLE_COLORS['rev_line'], lw=2, linestyle=':', label='Reverse Flow (Proportional)'),
 ]
-ax.legend(handles=legend_handles, loc='lower right', frameon=True, fancybox=False, edgecolor='black', fontsize=10,
-          bbox_to_anchor=(0.98, 0.02))
 
-ax.set_title(f"Optimized Closed-Loop Supply Chain Network (50 Cities)\nTotal Cost Analysis with Carbon Tax Mechanism",
-             pad=20, fontweight='bold')
-ax.set_xlabel("Longitude (°E)")
-ax.set_ylabel("Latitude (°N)")
+# 图例放置在右下角，半透明背景
+leg = ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
+                frameon=True, fancybox=True, framealpha=0.9, edgecolor='#CCCCCC',
+                bbox_to_anchor=(0.98, 0.02), title="Network Components", title_fontsize=11)
+leg.get_title().set_fontweight('bold')
+
+# 标题与坐标轴
+ax.set_title("Optimized Closed-Loop Supply Chain Network Structure (50 Cities)",
+             fontsize=16, fontweight='bold', pad=20, color='#333333')
+ax.set_xlabel("Longitude (°E)", fontsize=12, labelpad=10)
+ax.set_ylabel("Latitude (°N)", fontsize=12, labelpad=10)
+
+# 设置显示范围 (聚焦中国地图区域)
+ax.set_xlim(80, 135)
+ax.set_ylim(15, 55)
+
+# 添加经纬度网格 (淡雅)
+ax.grid(True, linestyle=':', linewidth=0.5, color='#999999', alpha=0.5, zorder=0)
+
+# 去除多余边框
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
 plt.tight_layout()
-plt.savefig("50cities_high_impact_plot.png", bbox_inches='tight')
+plt.savefig("50cities_optimized_vis.png", bbox_inches='tight', dpi=600)
 plt.show()
