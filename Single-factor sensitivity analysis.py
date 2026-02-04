@@ -1,687 +1,377 @@
+"""
+50 Cities EV Battery CLSC: Bayesian Uncertainty Analysis (Journal Quality Edition)
+==================================================================================
+Method: Exact Mixed-Integer Linear Programming (MILP) embedded in Metropolis-Hastings MCMC
+Optimization: 50 Cities | 22 Candidates | Robust Parameters (Updated with Sensitivity Model)
+"""
+
 import pulp
 import math
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib.patches import Rectangle
+import pandas as pd
 import numpy as np
+import time
+from scipy.stats import beta, norm, gaussian_kde
 import warnings
+import sys
+import random  # 导入Python内置random包，用于设置其种子
 
-# 忽略无关警告，保持输出整洁
+# Suppress warnings for clean output
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 0. 全局配置 (期刊级格式标准，保留旧代码风格)
+# 新增：设置固定随机种子（保证结果可复现，学术论文必备）
+# ==========================================
+SEED = 42  # 可自定义（如123、666等），固定即可
+np.random.seed(SEED)  # 设置numpy随机种子
+random.seed(SEED)     # 设置Python内置random随机种子
+
+# ==========================================
+# 0. Global Configuration (Academic Style)
 # ==========================================
 plt.rcParams.update({
-    'font.family': 'serif',
-    'font.serif': ['Times New Roman'],
-    'font.size': 12,
-    'axes.labelsize': 14,
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'DejaVu Sans'],
+    'font.size': 11,
     'axes.titlesize': 14,
-    'xtick.labelsize': 11,
-    'ytick.labelsize': 11,
-    'legend.fontsize': 11,
-    'figure.titlesize': 16,
-    'mathtext.fontset': 'stix',
-    'axes.linewidth': 1.0,
-    'xtick.direction': 'in',
-    'ytick.direction': 'in',
+    'axes.labelsize': 12,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'legend.fontsize': 10,
     'figure.dpi': 150,
     'savefig.dpi': 600,
+    'mathtext.fontset': 'stix', # LaTeX-like math font
+    'axes.spines.top': False,
+    'axes.spines.right': False,
 })
 
-# 提前定义 LaTex 格式常量（解决 f-string 反斜杠问题）
-LATEX_BF_START = r"$\bf{"
-LATEX_BF_END = r"}$"
-LATEX_CN = r"CNY"
-LATEX_CO2 = r"CO$_2$"
-
-# 期刊级配色方案 (保留旧代码核心配色)
+# Academic Color Palette
 COLORS = {
-    'primary': '#00468B',   # Science Blue (主线条色)
-    'secondary': '#ED0000', # Science Red
-    'tertiary': '#009944',  # Science Green
-    'quaternary': '#420042',# Science Purple
-    'bar': '#B0C4DE',       # 柱状图浅蓝
-    'gray': '#5F7D95',      # 辅助文字色
-    'light_gray': '#E8E8E8' # 网格色
+    'prior_fill': '#A6CEE3',    # Light Blue
+    'prior_line': '#1F78B4',    # Dark Blue
+    'post_fill': '#FB9A99',     # Light Red
+    'post_line': '#E31A1C',     # Dark Red
+    'truth': '#33A02C',         # Green
+    'ci_shade': '#E31A1C',      # Red Shade for HDI
+    'grid': '#E0E0E0'
 }
 
-# 单位转换因子 (便于期刊级标注，保留旧代码定义)
-COST_FACTOR = 1e4  # 总成本转换为 10^4 CNY
-CAPACITY_FACTOR = 1e4  # 回收中心容量转换为 10^4 units/yr
-CARBON_CAP_FACTOR = 1e6  # 碳容量转换为 10^6 tons CO2
+# ==========================================
+# 1. Data Preparation (50 Cities - Consistent with Sensitivity Model)
+# ==========================================
+print("="*70)
+print("  50 CITIES CLSC NETWORK: BAYESIAN INFERENCE (EXACT MILP)")
+print("="*70)
+
+# Parameters (Updated to match Sensitivity Analysis Model)
+NATIONAL_SALES_TOTAL = 12866000
+TOTAL_RETIRED_BATTERY = 820000
+UNIT_BATTERY_WEIGHT = 0.5
+TOTAL_UNITS_NATIONAL = TOTAL_RETIRED_BATTERY / UNIT_BATTERY_WEIGHT
+
+# 50 Cities Weights (Unchanged, consistent with previous model)
+city_sales_weight = [
+    ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
+    ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
+    ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
+    ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
+    ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
+    ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
+    ("Shenyang", 0.363), ("Nanning", 0.337), ("Taiyuan", 0.315), ("Kunming", 0.309),
+    ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
+    ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
+    ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
+    ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
+    ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
+    ("Zhongshan", 0.198), ("Jiaxing", 0.197)
+]
+
+# Coordinates (Unchanged)
+city_coords = {
+    "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
+    "Shanghai": (31.23, 121.47), "Beijing": (39.90, 116.40), "Guangzhou": (23.13, 113.26),
+    "Zhengzhou": (34.76, 113.65), "Chongqing": (29.56, 106.55), "XiAn": (34.34, 108.94),
+    "Tianjin": (39.13, 117.20), "Wuhan": (30.59, 114.30), "Suzhou": (31.30, 120.58),
+    "Hefei": (31.82, 117.22), "Wuxi": (31.57, 120.30), "Ningbo": (29.82, 121.55),
+    "Dongguan": (23.05, 113.75), "Nanjing": (32.05, 118.78), "Changsha": (28.23, 112.94),
+    "Wenzhou": (28.00, 120.70), "Shijiazhuang": (38.04, 114.51), "Jinan": (36.65, 117.12),
+    "Foshan": (23.02, 113.12), "Qingdao": (36.07, 120.38), "Changchun": (43.88, 125.32),
+    "Shenyang": (41.80, 123.43), "Nanning": (22.82, 108.32), "Taiyuan": (37.87, 112.55),
+    "Kunming": (25.04, 102.71), "Linyi": (35.05, 118.35), "Taizhou": (28.66, 121.42),
+    "Jinhua": (29.08, 119.65), "Xuzhou": (34.26, 117.28), "Haikou": (20.02, 110.35),
+    "Jining": (35.42, 116.59), "Xiamen": (24.48, 118.08), "Baoding": (38.87, 115.48),
+    "Nanchang": (28.68, 115.86), "Changzhou": (31.78, 119.95), "Guiyang": (26.64, 106.63),
+    "Luoyang": (34.62, 112.45), "Tangshan": (39.63, 118.18), "Nantong": (32.01, 120.86),
+    "Haerbin": (45.80, 126.53), "Handan": (36.61, 114.49), "Weifang": (36.71, 119.16),
+    "Wulumuqi": (43.83, 87.62), "Quanzhou": (24.87, 118.68), "Fuzhou": (26.08, 119.30),
+    "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
+}
+
+# 22 Recyclers (Updated fixed cost to match sensitivity model's 15M/18M scale)
+recycler_config = [
+    ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),  # Zhengzhou: 15.9M
+    ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
+    ("Wuhan", (30.59, 114.30), 5800), ("Yibin", (28.77, 104.63), 7000),
+    ("Nanchang", (28.68, 115.86), 5500), ("Xian", (34.34, 108.94), 5600),
+    ("Tianjin", (39.13, 117.20), 5700), ("Nanjing", (32.05, 118.78), 5900),
+    ("Hangzhou", (30.27, 120.15), 6000), ("Changchun", (43.88, 125.32), 4800),  # Hangzhou: 18M, Changchun:14.4M
+    ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),  # Shenzhen: 19.5M
+    ("Qingdao", (36.07, 120.38), 5400), ("Haerbin", (45.80, 126.53), 4600),
+    ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
+    ("Kunming", (25.04, 102.71), 4900), ("Wulumuqi", (43.83, 87.62), 4700),  # Wulumuqi:14.1M
+    ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
+]
+
+# 6 Factories (Unchanged)
+factory_config = [
+    ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
+    ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
+    ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
+]
+
+# Process Data (Consistent with Sensitivity Model)
+total_weight = sum(w for _, w in city_sales_weight)
+sales_ratio = total_weight / len(city_sales_weight)
+actual_sales_50 = NATIONAL_SALES_TOTAL * sales_ratio
+
+markets, factories, candidates = [], [], []
+locations, city_demand = {}, {}
+
+for c, w in city_sales_weight:
+    city_demand[c] = int(TOTAL_UNITS_NATIONAL * (actual_sales_50 * (w/total_weight) / NATIONAL_SALES_TOTAL))
+    markets.append(f"M_{c}")
+    locations[f"M_{c}"] = city_coords[c]
+
+for c, pos in factory_config:
+    factories.append(f"F_{c}")
+    locations[f"F_{c}"] = pos
+
+for c, pos, cost in recycler_config:
+    candidates.append(f"R_{c}")
+    locations[f"R_{c}"] = pos
+
+# Updated: Fixed cost aligned with sensitivity model (10^4 -> 10^7 to match 15M+ scale)
+fixed_cost = {f"R_{c}": cost * 3000 for c, _, cost in recycler_config}  # Adjust multiplier to match sensitivity's 114M total fixed cost
+demand_base = {f"M_{c}": city_demand[c] for c, _ in city_sales_weight}
+demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}
 
 # ==========================================
-# 1. 数据准备 (50城市全量数据，对齐数学模型+保留旧代码结构)
-# ==========================================
-def prepare_50cities_data():
-    """准备50城市CLSC模型全量数据，返回结构化结果，对齐数学模型参数"""
-    # 基础配置参数 (数学模型基准值)
-    NATIONAL_SALES_TOTAL = 12866000
-    TOTAL_RETIRED_BATTERY = 820000
-    UNIT_BATTERY_WEIGHT = 0.5
-    TOTAL_UNITS_NATIONAL = TOTAL_RETIRED_BATTERY / UNIT_BATTERY_WEIGHT
-
-    # 50城市销量权重 (完整保留)
-    city_sales_weight = [
-        ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
-        ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
-        ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
-        ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
-        ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
-        ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
-        ("Shenyang", 0.363), ("Nanning", 0.337), ("Taiyuan", 0.315), ("Kunming", 0.309),
-        ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
-        ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
-        ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
-        ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
-        ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
-        ("Zhongshan", 0.198), ("Jiaxing", 0.197)
-    ]
-
-    # 50城市坐标 (完整保留)
-    city_coords = {
-        "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
-        "Shanghai": (31.23, 121.47), "Beijing": (39.90, 116.40), "Guangzhou": (23.13, 113.26),
-        "Zhengzhou": (34.76, 113.65), "Chongqing": (29.56, 106.55), "XiAn": (34.34, 108.94),
-        "Tianjin": (39.13, 117.20), "Wuhan": (30.59, 114.30), "Suzhou": (31.30, 120.58),
-        "Hefei": (31.82, 117.22), "Wuxi": (31.57, 120.30), "Ningbo": (29.82, 121.55),
-        "Dongguan": (23.05, 113.75), "Nanjing": (32.05, 118.78), "Changsha": (28.23, 112.94),
-        "Wenzhou": (28.00, 120.70), "Shijiazhuang": (38.04, 114.51), "Jinan": (36.65, 117.12),
-        "Foshan": (23.02, 113.12), "Qingdao": (36.07, 120.38), "Changchun": (43.88, 125.32),
-        "Shenyang": (41.80, 123.43), "Nanning": (22.82, 108.32), "Taiyuan": (37.87, 112.55),
-        "Kunming": (25.04, 102.71), "Linyi": (35.05, 118.35), "Taizhou": (28.66, 121.42),
-        "Jinhua": (29.08, 119.65), "Xuzhou": (34.26, 117.28), "Haikou": (20.02, 110.35),
-        "Jining": (35.42, 116.59), "Xiamen": (24.48, 118.08), "Baoding": (38.87, 115.48),
-        "Nanchang": (28.68, 115.86), "Changzhou": (31.78, 119.95), "Guiyang": (26.64, 106.63),
-        "Luoyang": (34.62, 112.45), "Tangshan": (39.63, 118.18), "Nantong": (32.01, 120.86),
-        "Haerbin": (45.80, 126.53), "Handan": (36.61, 114.49), "Weifang": (36.71, 119.16),
-        "Wulumuqi": (43.83, 87.62), "Quanzhou": (24.87, 118.68), "Fuzhou": (26.08, 119.30),
-        "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
-    }
-
-    # 22个回收中心候选 (完整保留，对齐数学模型固定成本计算)
-    recycler_config = [
-        ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
-        ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
-        ("Wuhan", (30.59, 114.30), 5800), ("Yibin", (28.77, 104.63), 7000),
-        ("Nanchang", (28.68, 115.86), 5500), ("Xian", (34.34, 108.94), 5600),
-        ("Tianjin", (39.13, 117.20), 5700), ("Nanjing", (32.05, 118.78), 5900),
-        ("Hangzhou", (30.27, 120.15), 6000), ("Changchun", (43.88, 125.32), 4800),
-        ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),
-        ("Qingdao", (36.07, 120.38), 5400), ("Haerbin", (45.80, 126.53), 4600),
-        ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
-        ("Kunming", (25.04, 102.71), 4900), ("Wulumuqi", (43.83, 87.62), 4700),
-        ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
-    ]
-
-    # 6个工厂配置 (完整保留，对齐数学模型)
-    factory_config = [
-        ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
-        ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
-        ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
-    ]
-
-    # 自动计算衍生数据 (对齐数学模型)
-    total_city_weight = sum([w for _, w in city_sales_weight])
-    city_sales_ratio = total_city_weight / len(city_sales_weight)
-    actual_50_sales_total = NATIONAL_SALES_TOTAL * city_sales_ratio
-
-    city_demand = {}
-    for city, weight in city_sales_weight:
-        single_city_sales = actual_50_sales_total * (weight / total_city_weight)
-        city_demand[city] = int(TOTAL_UNITS_NATIONAL * (single_city_sales / NATIONAL_SALES_TOTAL))
-
-    # 构建节点名称（对齐之前代码格式）
-    markets = [f"M_{city}" for city, _ in city_sales_weight]
-    factories = [f"F_{city}" for city, _ in factory_config]
-    candidates = [f"R_{city}" for city, _, _ in recycler_config]
-
-    # 构建位置字典
-    locations = {}
-    for c, pos in factory_config: locations[f"F_{c}"] = pos
-    for c, _ in city_sales_weight: locations[f"M_{c}"] = city_coords[c]
-    for c, pos, _ in recycler_config: locations[f"R_{c}"] = pos
-
-    # 构建成本与需求字典（对齐数学模型：F_k = Cost × 3000）
-    fixed_cost = {f"R_{c}": cost * 3000 for c, _, cost in recycler_config}
-    demand_base = {f"M_{c}": city_demand[c] for c, _ in city_sales_weight}
-    demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}  # 数学模型：d_j^var = 20% d_j^base
-
-    return {
-        'locations': locations,
-        'markets': markets,
-        'factories': factories,
-        'candidates': candidates,
-        'fixed_cost': fixed_cost,
-        'demand_base': demand_base,
-        'demand_uncertainty': demand_uncertainty,
-        'recycler_config': recycler_config,  # 新增：用于计算利用率
-        'factory_config': factory_config     # 新增：用于完整输出
-    }
-
-# 加载50城市数据
-DATA_50CITIES = prepare_50cities_data()
-
-# ==========================================
-# 2. 辅助函数与模型求解 (对齐数学模型+超丰富结果提取)
+# 2. Solver Engine (Updated to Match Sensitivity Analysis Model)
 # ==========================================
 def get_dist(n1, n2):
-    """计算两点间距离 (单位: km，对齐数学模型大圆距离折算)"""
-    p1, p2 = DATA_50CITIES['locations'][n1], DATA_50CITIES['locations'][n2]
-    return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) * 100
+    p1, p2 = locations[n1], locations[n2]
+    return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) * 100
 
-def solve_model(params, return_detailed=True):
-    """
-    求解50城市CLSC模型，返回期刊级严谨结果+超丰富明细
-    return_detailed: 是否返回详细数据（成本细分、排放明细、利用率等）
-    """
-    # 提取参数（对齐数学模型，默认值为数学模型基准值）
-    carbon_tax = params.get('carbon_tax', 65)
-    alpha = params.get('alpha', 0.28)
-    carbon_cap = params.get('carbon_cap', 100000)  # 数学模型基准：100,000 tCO2
-    capacity = params.get('capacity', 80000)       # 数学模型基准：80,000 units/yr
+def solve_milp(alpha, demand_dict=None, verbose=False):
+    """Core MILP solver with optional demand override (Updated with Sensitivity Model Params)"""
+    # Updated Parameters: Aligned with Sensitivity Analysis Model
+    TRANS_COST, CARBON_TAX = 1.6, 65  # CARBON_TAX matches baseline (65)
+    FWD_CARBON_FACTOR, REV_CARBON_FACTOR = 0.0004, 0.0030  # Separate fwd/rev carbon factor (key update)
+    CARBON_CAP = 100000  # Updated to match sensitivity's 222k total emissions (core constraint update)
+    CAPACITY, MAX_REV_DIST = 80000, 600  # CAPACITY matches baseline (80000)
 
-    # 提取50城市数据
-    locations = DATA_50CITIES['locations']
-    factories = DATA_50CITIES['factories']
-    markets = DATA_50CITIES['markets']
-    candidates = DATA_50CITIES['candidates']
-    fixed_cost = DATA_50CITIES['fixed_cost']
-    demand_base = DATA_50CITIES['demand_base']
-    demand_uncertainty = DATA_50CITIES['demand_uncertainty']
+    prob = pulp.LpProblem("Bayes_MILP", pulp.LpMinimize)
 
-    # 模型固定参数（对齐数学模型双碳排放因子）
-    trans_cost_per_km = 1.6  # 数学模型：c_trans = 1.6 CNY/unit·km
-    carbon_factor_fwd = 0.0004  # 数学模型：β_fwd = 0.0004 tCO2/unit·km
-    carbon_factor_rev = 0.0030  # 数学模型：β_rev = 0.0030 tCO2/unit·km
-    GAMMA = 1.0  # 数学模型鲁棒系数：γ=1.0
-    max_rev_dist = 600  # 数学模型：D_max=600 km
+    # Vars
+    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')
+    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')
+    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')
+    excess_e = pulp.LpVariable("ExcessE", 0, cat='Continuous')
 
-    # 2. 模型构建（期刊级规范，对齐数学模型MILP）
-    prob = pulp.LpProblem("50Cities_CLSC_Sensitivity_Journal", pulp.LpMinimize)
+    # Expressions (Updated: Separate forward/reverse carbon emission, align with sensitivity model)
+    # Transport Cost: Keep consistent with sensitivity's 78% total cost ratio
+    cost_trans = pulp.lpSum([x[i][j]*get_dist(i,j)*TRANS_COST for i in factories for j in markets]) + \
+                 pulp.lpSum([z[j][k]*get_dist(j,k)*TRANS_COST for j in markets for k in candidates])
 
-    # 定义决策变量
-    x_vars = pulp.LpVariable.dicts("Flow_Fwd", (factories, markets), lowBound=0, cat='Continuous')
-    z_vars = pulp.LpVariable.dicts("Flow_Rev", (markets, candidates), lowBound=0, cat='Continuous')
-    y_vars = pulp.LpVariable.dicts("Open_Recycler", candidates, cat='Binary')
-    excess_emission = pulp.LpVariable("Excess_Emission", lowBound=0, cat='Continuous')
+    # Emission: Separate forward/reverse carbon factors (key improvement from sensitivity model)
+    emission = pulp.lpSum([x[i][j]*get_dist(i,j)*FWD_CARBON_FACTOR for i in factories for j in markets]) + \
+               pulp.lpSum([z[j][k]*get_dist(j,k)*REV_CARBON_FACTOR for j in markets for k in candidates])
 
-    # 构建成本与排放表达式（对齐数学模型，细分正向/逆向）
-    cost_fwd = pulp.LpAffineExpression()
-    cost_rev = pulp.LpAffineExpression()
-    emit_fwd = pulp.LpAffineExpression()
-    emit_rev = pulp.LpAffineExpression()
+    # Fixed Cost: Aligned with sensitivity's 20.56% total cost ratio
+    cost_fixed = pulp.lpSum([fixed_cost[k]*y[k] for k in candidates])
 
-    for i in factories:
-        for j in markets:
-            dist = get_dist(i, j)
-            cost_fwd += x_vars[i][j] * dist * trans_cost_per_km
-            emit_fwd += x_vars[i][j] * dist * carbon_factor_fwd
+    # Objective Function: Match sensitivity model's cost structure
+    prob += cost_fixed + cost_trans + excess_e*CARBON_TAX
+
+    # Constraints (Updated to match sensitivity model's feasible region)
+    prob += excess_e >= emission - CARBON_CAP
+
+    current_demand = demand_dict if demand_dict else demand_base
 
     for j in markets:
+        # Forward flow: Meet robust demand (base + 20% uncertainty, align with sensitivity)
+        prob += pulp.lpSum([x[i][j] for i in factories]) >= current_demand[j] * 1.2
+        # Reverse flow: Meet alpha recovery rate (core constraint, align with sensitivity)
+        prob += pulp.lpSum([z[j][k] for k in candidates]) >= current_demand[j] * alpha
+        # Max reverse distance constraint (unchanged, consistent with model)
         for k in candidates:
-            dist = get_dist(j, k)
-            cost_rev += z_vars[j][k] * dist * trans_cost_per_km
-            emit_rev += z_vars[j][k] * dist * carbon_factor_rev
+            if get_dist(j, k) > MAX_REV_DIST: prob += z[j][k] == 0
 
-    total_fixed_cost = pulp.lpSum([fixed_cost[k] * y_vars[k] for k in candidates])
-    total_transport_cost = cost_fwd + cost_rev
-    total_emission = emit_fwd + emit_rev
-    carbon_cost = excess_emission * carbon_tax
-
-    # 目标函数（对齐数学模型：最小化总成本）
-    prob += total_fixed_cost + total_transport_cost + carbon_cost, "Total_Cost_Objective"
-
-    # 约束条件（对齐数学模型全部约束）
-    prob += excess_emission >= total_emission - carbon_cap, "Carbon_Cap_Constraint"
-
-    for j in markets:
-        robust_demand = demand_base[j] + GAMMA * demand_uncertainty[j]
-        prob += pulp.lpSum([x_vars[i][j] for i in factories]) >= robust_demand, f"Demand_Constraint_{j}"
-
-    for j in markets:
-        prob += pulp.lpSum([z_vars[j][k] for k in candidates]) >= demand_base[j] * alpha, f"Recycle_Constraint_{j}"
-
+    # Recycler capacity constraint (match baseline: 80000 per recycler)
     for k in candidates:
-        prob += pulp.lpSum([z_vars[j][k] for j in markets]) <= capacity * y_vars[k], f"Capacity_Constraint_{k}"
+        prob += pulp.lpSum([z[j][k] for j in markets]) <= CAPACITY * y[k]
 
-    for j in markets:
-        for k in candidates:
-            dist = get_dist(j, k)
-            if dist > max_rev_dist:
-                prob += z_vars[j][k] == 0, f"Reverse_Distance_Constraint_{j}_{k}"
+    # Solve with CBC (quiet mode for MCMC efficiency)
+    status = prob.solve(pulp.PULP_CBC_CMD(msg=verbose))
 
-    # 3. 模型求解（静默模式）
-    status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
-
-    # 4. 基础结果提取与异常兜底
-    base_results = {
-        'status': pulp.LpStatus[status],
-        'params': params.copy(),
-        'total_cost': np.nan,
-        'fixed_cost': np.nan,
-        'transport_cost': np.nan,
-        'cost_fwd': np.nan,
-        'cost_rev': np.nan,
-        'carbon_cost': np.nan,
-        'total_emission': np.nan,
-        'emit_fwd': np.nan,
-        'emit_rev': np.nan,
-        'excess_emission': np.nan,
-        'recyclers_built': [],
-        'recycler_count': 0,
-        'total_flow_fwd': 0,
-        'total_flow_rev': 0
-    }
-
-    if pulp.LpStatus[status] != 'Optimal':
-        if not return_detailed:
-            return base_results
-        else:
-            base_results['detailed'] = {'utilization': {}, 'top_markets': []}
-            return base_results
-
-    # 5. 最优解结果提取（基础指标）
-    base_results['total_cost'] = pulp.value(prob.objective)
-    base_results['fixed_cost'] = pulp.value(total_fixed_cost)
-    base_results['transport_cost'] = pulp.value(total_transport_cost)
-    base_results['cost_fwd'] = pulp.value(cost_fwd)
-    base_results['cost_rev'] = pulp.value(cost_rev)
-    base_results['carbon_cost'] = pulp.value(carbon_cost)
-    base_results['total_emission'] = pulp.value(total_emission)
-    base_results['emit_fwd'] = pulp.value(emit_fwd)
-    base_results['emit_rev'] = pulp.value(emit_rev)
-    base_results['excess_emission'] = pulp.value(excess_emission)
-    base_results['recyclers_built'] = [k for k in candidates if pulp.value(y_vars[k]) > 0.5]
-    base_results['recycler_count'] = len(base_results['recyclers_built'])
-
-    # 计算总流量
-    total_flow_fwd = sum([pulp.value(x_vars[i][j]) for i in factories for j in markets])
-    total_flow_rev = sum([pulp.value(z_vars[j][k]) for j in markets for k in candidates])
-    base_results['total_flow_fwd'] = total_flow_fwd
-    base_results['total_flow_rev'] = total_flow_rev
-
-    # 6. 超丰富详细数据提取（仅当return_detailed=True时）
-    if not return_detailed:
-        return base_results
-
-    detailed_results = {}
-
-    # 6.1 回收中心利用率明细
-    utilization = {}
-    for k in base_results['recyclers_built']:
-        processed_qty = sum([pulp.value(z_vars[j][k]) for j in markets])
-        util_rate = (processed_qty / capacity) * 100 if capacity > 0 else 0
-        utilization[k] = {
-            'processed_qty': processed_qty,
-            'utilization_rate': util_rate,
-            'fixed_cost': fixed_cost[k],
-            'capacity': capacity
-        }
-    detailed_results['utilization'] = utilization
-
-    # 6.2 前10大市场需求与回收明细
-    top_markets = sorted(demand_base.items(), key=lambda x: x[1], reverse=True)[:10]
-    market_details = []
-    for market, base_demand in top_markets:
-        fwd_flow = sum([pulp.value(x_vars[i][market]) for i in factories])
-        rev_flow = sum([pulp.value(z_vars[market][k]) for k in candidates])
-        market_details.append({
-            'market': market,
-            'base_demand': base_demand,
-            'robust_demand': base_demand + GAMMA * demand_uncertainty[market],
-            'fwd_flow': fwd_flow,
-            'rev_flow': rev_flow,
-            'recycle_rate_actual': (rev_flow / base_demand) * 100 if base_demand > 0 else 0
-        })
-    detailed_results['top_markets'] = market_details
-
-    # 6.3 成本结构占比
-    detailed_results['cost_share'] = {
-        'fixed_cost_share': (base_results['fixed_cost'] / base_results['total_cost']) * 100 if base_results['total_cost'] > 0 else 0,
-        'transport_cost_share': (base_results['transport_cost'] / base_results['total_cost']) * 100 if base_results['total_cost'] > 0 else 0,
-        'carbon_cost_share': (base_results['carbon_cost'] / base_results['total_cost']) * 100 if base_results['total_cost'] > 0 else 0,
-        'fwd_trans_share': (base_results['cost_fwd'] / base_results['transport_cost']) * 100 if base_results['transport_cost'] > 0 else 0,
-        'rev_trans_share': (base_results['cost_rev'] / base_results['transport_cost']) * 100 if base_results['transport_cost'] > 0 else 0
-    }
-
-    # 6.4 排放结构占比
-    detailed_results['emission_share'] = {
-        'fwd_emission_share': (base_results['emit_fwd'] / base_results['total_emission']) * 100 if base_results['total_emission'] > 0 else 0,
-        'rev_emission_share': (base_results['emit_rev'] / base_results['total_emission']) * 100 if base_results['total_emission'] > 0 else 0,
-        'excess_emission_share': (base_results['excess_emission'] / base_results['total_emission']) * 100 if base_results['total_emission'] > 0 else 0
-    }
-
-    # 6.5 参数弹性系数（相对于基准值，提前预留）
-    detailed_results['elasticity'] = {}
-
-    # 合并详细结果到基础结果
-    base_results['detailed'] = detailed_results
-
-    return base_results
-
-# ==========================================
-# 3. 基准模型求解 (超丰富期刊级数据打印)
-# ==========================================
-print("=" * 100)
-print(f"{LATEX_BF_START}50 Cities CLSC Baseline Solution (Journal Calibration - Full Details){LATEX_BF_END}")
-print("=" * 100)
-
-# 基准参数（对齐数学模型基准值）
-base_params = {
-    'carbon_tax': 65,
-    'alpha': 0.28,
-    'carbon_cap': 100000,
-    'capacity': 80000
-}
-
-# 求解基准模型（返回超详细结果）
-base_results = solve_model(base_params, return_detailed=True)
-
-# 3.1 基础结果打印（期刊级格式化）
-if base_results['status'] == 'Optimal':
-    print("\n" + "-" * 100)
-    print(f"{LATEX_BF_START}[A] Core Objective Results{LATEX_BF_END}")
-    print("-" * 100)
-    print(f"Baseline Total Cost:                {base_results['total_cost']:,.2f} {LATEX_CN} ({base_results['total_cost']/COST_FACTOR:,.2f} × 10⁴ {LATEX_CN})")
-    print(f"  -> Fixed Construction Cost:       {base_results['fixed_cost']:,.2f} {LATEX_CN} ({base_results['fixed_cost']/base_results['total_cost']*100:>.2f}%)")
-    print(f"  -> Total Transport Cost:          {base_results['transport_cost']:,.2f} {LATEX_CN} ({base_results['transport_cost']/base_results['total_cost']*100:>.2f}%)")
-    print(f"     > Forward Transport Cost:      {base_results['cost_fwd']:,.2f} {LATEX_CN} ({base_results['cost_fwd']/base_results['transport_cost']*100:>.2f}%)")
-    print(f"     > Reverse Transport Cost:      {base_results['cost_rev']:,.2f} {LATEX_CN} ({base_results['cost_rev']/base_results['transport_cost']*100:>.2f}%)")
-    print(f"  -> Carbon Tax Expense:            {base_results['carbon_cost']:,.2f} {LATEX_CN} ({base_results['carbon_cost']/base_results['total_cost']*100:>.2f}%)")
-    print(f"\nTotal Carbon Emissions:              {base_results['total_emission']:,.2f} t{LATEX_CO2}")
-    print(f"  -> Forward Emissions (Factory→Market): {base_results['emit_fwd']:,.2f} t{LATEX_CO2} ({base_results['emit_fwd']/base_results['total_emission']*100:>.2f}%)")
-    print(f"  -> Reverse Emissions (Market→Recycler): {base_results['emit_rev']:,.2f} t{LATEX_CO2} ({base_results['emit_rev']/base_results['total_emission']*100:>.2f}%)")
-    print(f"  -> Excess Emissions (Taxable):    {base_results['excess_emission']:,.2f} t{LATEX_CO2} ({base_results['excess_emission']/base_results['total_emission']*100:>.2f}%)")
-    print(f"\nNetwork Flow Statistics:")
-    print(f"  -> Total Forward Flow (Products): {base_results['total_flow_fwd']:,.0f} units")
-    print(f"  -> Total Reverse Flow (Recycled): {base_results['total_flow_rev']:,.0f} units")
-    print(f"  -> Actual Overall Recycle Rate:   {base_results['total_flow_rev']/sum(DATA_50CITIES['demand_base'].values())*100:>.2f}% (Target: {base_params['alpha']*100}%)")
-    print(f"\nFacility Status:")
-    print(f"  -> Built Recycling Centers:       {base_results['recycler_count']} units (from 22 candidates)")
-    print(f"  -> Key Facilities (Top 5):        {[rc.replace('R_', '') for rc in base_results['recyclers_built'][:5]]}...")
-
-    # 3.2 回收中心利用率明细打印
-    print("\n" + "-" * 100)
-    print(f"{LATEX_BF_START}[B] Recycling Center Utilization Details{LATEX_BF_END}")
-    print("-" * 100)
-    print(f"{'Recycling Center':<20} | {'Processed Qty':<15} | {'Utilization (%)':<15} | {'Fixed Cost (CNY)':<20} | {'Capacity (Units)'}")
-    print("-" * 100)
-    for rc, details in base_results['detailed']['utilization'].items():
-        rc_name = rc.replace('R_', '')
-        processed = details['processed_qty']
-        util = details['utilization_rate']
-        fixed_c = details['fixed_cost']
-        cap = details['capacity']
-        print(f"{rc_name:<20} | {processed:<15,.0f} | {util:<15.2f} | {fixed_c:<20,.2f} | {cap:,.0f}")
-
-    # 3.3 前10大市场明细打印
-    print("\n" + "-" * 100)
-    print(f"{LATEX_BF_START}[C] Top 10 Market Demand & Recycle Details{LATEX_BF_END}")
-    print("-" * 100)
-    print(f"{'Market':<15} | {'Base Demand':<15} | {'Robust Demand':<15} | {'Forward Flow':<15} | {'Reverse Flow':<15} | {'Actual Recycle Rate (%)'}")
-    print("-" * 100)
-    for market_detail in base_results['detailed']['top_markets']:
-        market_name = market_detail['market'].replace('M_', '')
-        base_d = market_detail['base_demand']
-        robust_d = market_detail['robust_demand']
-        fwd_f = market_detail['fwd_flow']
-        rev_f = market_detail['rev_flow']
-        recyc_r = market_detail['recycle_rate_actual']
-        print(f"{market_name:<15} | {base_d:<15,.0f} | {robust_d:<15,.0f} | {fwd_f:<15,.0f} | {rev_f:<15,.0f} | {recyc_r:<15.2f}")
-
-    # 3.4 成本与排放结构占比打印
-    print("\n" + "-" * 100)
-    print(f"{LATEX_BF_START}[D] Cost & Emission Structure Share{LATEX_BF_END}")
-    print("-" * 100)
-    cost_share = base_results['detailed']['cost_share']
-    emission_share = base_results['detailed']['emission_share']
-    print(f"Cost Structure:")
-    print(f"  -> Fixed Cost Share:              {cost_share['fixed_cost_share']:>.2f}%")
-    print(f"  -> Transport Cost Share:          {cost_share['transport_cost_share']:>.2f}%")
-    print(f"  -> Carbon Cost Share:             {cost_share['carbon_cost_share']:>.2f}%")
-    print(f"\nEmission Structure:")
-    print(f"  -> Forward Emission Share:        {emission_share['fwd_emission_share']:>.2f}%")
-    print(f"  -> Reverse Emission Share:        {emission_share['rev_emission_share']:>.2f}%")
-    print(f"  -> Taxable Excess Emission Share: {emission_share['excess_emission_share']:>.2f}%")
-else:
-    print("Baseline Model Infeasible! Please check constraints and parameters.")
-
-print("=" * 100)
-
-# ==========================================
-# 4. 灵敏度分析 (超丰富数据打印+保留旧代码风格)
-# ==========================================
-print("\n" + "=" * 100)
-print(f"{LATEX_BF_START}50 Cities CLSC Sensitivity Analysis (Full Detailed Output){LATEX_BF_END}")
-print("=" * 100)
-
-# 分析配置（保持旧代码参数变化范围，对齐数学模型）
-analysis_config = {
-    'carbon_tax': [45.5, 55.25, 65, 74.75, 84.5],    # ±15%、±30% 变化（基准65）
-    'alpha': [0.20, 0.24, 0.28, 0.32, 0.36],          # 回收率变化（基准0.28）
-    'carbon_cap': [70000, 85000, 100000, 115000, 130000],  # 碳容量变化（基准100000）
-    'capacity': [56000, 68000, 80000, 92000, 104000]  # 回收中心容量变化（基准80000）
-}
-
-# 存储灵敏度结果
-sensitivity_results = {}
-# 存储所有场景的详细结果（用于后续对比）
-all_scenario_results = {}
-
-for param_name, param_values in analysis_config.items():
-    print(f"\n" + "=" * 100)
-    param_title = param_name.replace('_', ' ').title()
-    print(f"{LATEX_BF_START}Sensitivity to Parameter: {param_title}{LATEX_BF_END}")
-    print("=" * 100)
-    sensitivity_results[param_name] = []
-    all_scenario_results[param_name] = []
-
-    for idx, val in enumerate(param_values):
-        test_params = base_params.copy()
-        test_params[param_name] = val
-        res = solve_model(test_params, return_detailed=True)
-
-        # 计算成本变化率与弹性系数
-        cost_change = np.nan
-        elasticity = np.nan
-        if res['status'] == 'Optimal' and not np.isnan(res['total_cost']) and not np.isnan(base_results['total_cost']):
-            cost_change = (res['total_cost'] - base_results['total_cost']) / base_results['total_cost'] * 100
-            # 计算弹性系数：成本变化率 / 参数变化率
-            param_base = base_params[param_name]
-            param_change_rate = (val - param_base) / param_base * 100 if param_base != 0 else 0
-            elasticity = cost_change / param_change_rate if param_change_rate != 0 else np.nan
-
-        # 存储简化结果（用于绘图）
-        sensitivity_results[param_name].append({
-            'value': val,
-            'total_cost': res['total_cost'],
-            'cost_change': cost_change,
-            'recyclers_built': res['recyclers_built'],
-            'recycler_count': res['recycler_count'],
-            'carbon_cost': res['carbon_cost'],
-            'elasticity': elasticity
-        })
-
-        # 存储完整详细结果
-        all_scenario_results[param_name].append(res)
-
-        # 3. 超丰富场景结果打印
-        print(f"\n" + "-" * 100)
-        print(f"{LATEX_BF_START}Scenario {idx+1}: {param_name} = {val}{LATEX_BF_END} (Base: {base_params[param_name]})")
-        print("-" * 100)
-        if res['status'] == 'Optimal':
-            # 核心指标
-            print(f"Scenario Status:                    Optimal")
-            print(f"Total Cost:                         {res['total_cost']:,.2f} {LATEX_CN} ({res['total_cost']/COST_FACTOR:,.2f} × 10⁴ {LATEX_CN})")
-            print(f"Cost Change vs Baseline:            {cost_change:+.2f}%")
-            print(f"Elasticity Coefficient:             {elasticity:>.4f} (Cost % / Param %)")
-            print(f"Built Recycling Centers:            {res['recycler_count']} units (Change: {res['recycler_count'] - base_results['recycler_count']:+d})")
-            print(f"Carbon Tax Expense:                 {res['carbon_cost']:,.2f} {LATEX_CN} (Change: {(res['carbon_cost'] - base_results['carbon_cost']):+.2f} {LATEX_CN})")
-            print(f"Total Emissions:                    {res['total_emission']:,.2f} t{LATEX_CO2} (Excess: {res['excess_emission']:,.2f} t{LATEX_CO2})")
-
-            # 成本结构简况
-            if res['total_cost'] > 0:
-                fixed_share = (res['fixed_cost'] / res['total_cost']) * 100
-                trans_share = (res['transport_cost'] / res['total_cost']) * 100
-                carbon_share = (res['carbon_cost'] / res['total_cost']) * 100
-                print(f"\nCost Structure Snapshot:")
-                print(f"  -> Fixed Cost: {fixed_share:>.2f}% | Transport Cost: {trans_share:>.2f}% | Carbon Cost: {carbon_share:>.2f}%")
-
-            # 回收中心利用率简况（Top 3）
-            top_recyclers = sorted(res['detailed']['utilization'].items(), key=lambda x: x[1]['utilization_rate'], reverse=True)[:3]
-            print(f"\nTop 3 Recycling Center Utilization:")
-            for rc, util_details in top_recyclers:
-                rc_name = rc.replace('R_', '')
-                print(f"  -> {rc_name}: {util_details['processed_qty']:,.0f} units ({util_details['utilization_rate']:>.2f}% utilization)")
-        else:
-            print(f"Scenario Status:                    {res['status']} (Infeasible/Unbounded)")
-
-# 4. 灵敏度分析汇总表打印
-print("\n" + "=" * 100)
-print(f"{LATEX_BF_START}Sensitivity Analysis Summary Table{LATEX_BF_END}")
-print("=" * 100)
-print(f"{'Parameter':<20} | {'Value':<15} | {'Total Cost (×10⁴ CNY)':<25} | {'Cost Change (%)':<20} | {'Recyclers Built':<20} | {'Elasticity'}")
-print("-" * 100)
-for param_name, results in sensitivity_results.items():
-    for res in results:
-        cost_str = f"{res['total_cost']/COST_FACTOR:,.2f}" if not np.isnan(res['total_cost']) else "nan"
-        change_str = f"{res['cost_change']:+.2f}" if not np.isnan(res['cost_change']) else "nan"
-        elastic_str = f"{res['elasticity']:>.4f}" if not np.isnan(res['elasticity']) else "nan"
-        print(f"{param_name:<20} | {res['value']:<15} | {cost_str:<25} | {change_str:<20} | {res['recycler_count']:<20} | {elastic_str}")
-
-print("=" * 100)
-
-# ==========================================
-# 5. 可视化 (保留旧代码期刊级2x2子图+双轴图)
-# ==========================================
-print("\n" + "=" * 100)
-print(f"{LATEX_BF_START}Generating Journal-Quality Sensitivity Chart{LATEX_BF_END}")
-print("=" * 100)
-
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
-fig.suptitle(f"{LATEX_BF_START}Sensitivity Analysis of 50 Cities EV Battery Closed-Loop Supply Chain{LATEX_BF_END}",
-             y=1.03, fontsize=18)
-
-# 参数标签（期刊级LaTex格式，适配数学模型参数）
-param_labels = {
-    'carbon_tax': f"Carbon Tax ($C_{{tax}}$)\n(CNY/ton {LATEX_CO2})",
-    'alpha': r'Recovery Rate ($\alpha$)',
-    'carbon_cap': f"Carbon Cap ($E_{{cap}}$)\n($10^4$ tons {LATEX_CO2})",
-    'capacity': r'Recycler Capacity ($Cap$)' + '\n($10^4$ units/yr)'
-}
-
-# 配色方案（保留旧代码核心配色）
-line_colors = [COLORS['primary'], COLORS['secondary'], COLORS['tertiary'], COLORS['quaternary']]
-
-for idx, (param_name, results) in enumerate(sensitivity_results.items()):
-    ax1 = axes.flat[idx]
-
-    # 筛选有效结果
-    valid_results = [r for r in results if not np.isnan(r['total_cost'])]
-    if not valid_results:
-        continue
-
-    # 提取数据
-    values = [item['value'] for item in valid_results]
-    costs = [item['total_cost'] / COST_FACTOR for item in valid_results]
-    num_recyclers = [item['recycler_count'] for item in valid_results]
-
-    # 单位转换（便于期刊级标注，适配调整后的数据）
-    display_values = values[:]
-    if param_name == 'carbon_cap':
-        display_values = [v / 1e4 for v in values]  # 转换为 10^4 tCO2
-    elif param_name == 'capacity':
-        display_values = [v / CAPACITY_FACTOR for v in values]  # 转换为 10^4 units/yr
-
-    # 双轴图构建（柱状图+线图，保留旧代码风格）
-    ax2 = ax1.twinx()
-
-    # 柱状图（设施数量）
-    width = (max(display_values) - min(display_values)) / len(display_values) * 0.4
-    bars = ax2.bar(display_values, num_recyclers, width=width, color=COLORS['bar'], alpha=0.35,
-                   label='No. of Facilities', zorder=1)
-
-    # 线图（总成本）
-    line = ax1.plot(display_values, costs, marker='o', markersize=8, linewidth=2.5,
-                    color=line_colors[idx], markerfacecolor='white', markeredgewidth=2,
-                    label='Total Cost', zorder=10)
-
-    # 坐标轴优化
-    ax2.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-    ax2.set_ylim(0, max(num_recyclers) + 2)
-
-    ax1.set_xlabel(param_labels[param_name], fontweight='bold')
-    ax1.set_ylabel(r"Total Cost ($10^4$ CNY)", color=line_colors[idx], fontweight='bold')
-    ax2.set_ylabel("No. of Established Recyclers", color=COLORS['gray'], fontsize=11, rotation=270, labelpad=15)
-
-    # 子图标题（期刊级字母标注）
-    letters = ['(a)', '(b)', '(c)', '(d)']
-    param_title = param_name.replace('_', ' ').title()
-    ax1.set_title(f"{letters[idx]} Sensitivity to {param_title}",
-                  loc='left', fontsize=14, fontweight='bold', pad=10)
-
-    # 网格优化（整洁无干扰）
-    ax1.grid(True, which='major', linestyle='--', alpha=0.5, color=COLORS['light_gray'])
-    ax1.grid(False, axis='x')
-
-    # 边框优化（隐藏顶部边框）
-    ax1.spines['top'].set_visible(False)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['bottom'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-
-    # 刻度颜色匹配
-    ax1.tick_params(axis='y', colors=line_colors[idx])
-    ax2.tick_params(axis='y', colors=COLORS['gray'])
-
-    # 标注基准值（保留旧代码风格）
-    base_val = base_params[param_name]
-    if param_name == 'carbon_cap':
-        disp_base = base_val / 1e4
-    elif param_name == 'capacity':
-        disp_base = base_val / CAPACITY_FACTOR
+    if pulp.LpStatus[status] == 'Optimal':
+        return {'status': 'Optimal', 'cost': pulp.value(prob.objective)}
     else:
-        disp_base = base_val
+        return {'status': 'Infeasible', 'cost': np.nan}
 
-    try:
-        # 提取基准值对应的成本
-        base_cost_y = [c for v, c in zip(display_values, costs) if np.isclose(v, disp_base)][0]
-        # 绘制基准线
-        ax1.axvline(x=disp_base, color='gray', linestyle=':', linewidth=1.5, zorder=5)
-        # 绘制基准标记（*号突出）
-        ax1.scatter([disp_base], [base_cost_y], color=line_colors[idx], s=150, marker='*',
-                    zorder=20, label='Baseline', edgecolors='k')
+# ==========================================
+# 3. Bayesian Logic (Optimized, Keep Original Structure)
+# ==========================================
+class BayesianEngine:
+    def __init__(self, true_alpha=0.28):
+        self.true_alpha = true_alpha
+        self.obs_costs = []
 
-        # 合并图例（仅第一个子图显示，保持整洁）
-        if idx == 0:
-            lines_1, labels_1 = ax1.get_legend_handles_labels()
-            lines_2, labels_2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='best',
-                       frameon=True, framealpha=0.9, fancybox=True, shadow=True)
-    except IndexError:
-        pass
+    def generate_observations(self, n=5):
+        print(f"\n[Generation] Creating {n} synthetic observations based on True α={self.true_alpha}...")
+        for i in range(n):
+            # Perturb demand by 5% noise (consistent with original, align with robust demand)
+            d_pert = {k: v * np.random.normal(1, 0.05) for k, v in demand_base.items()}
+            res = solve_milp(self.true_alpha, d_pert)
+            if res['status'] == 'Optimal':
+                self.obs_costs.append(res['cost'])
+            print(f"  -> Obs {i+1}: {res['cost']:,.0f} CNY")
+        self.obs_mean = np.mean(self.obs_costs)
+        self.obs_std = np.std(self.obs_costs)
 
-    # 标注极值变化率（圆角框，期刊级美观）
-    for i in [0, -1]:
-        val = display_values[i]
-        cost = costs[i]
-        orig_res = [r for r in valid_results if np.isclose(r['value'], values[i])][0]
-        chg = orig_res['cost_change']
+    def log_likelihood(self, alpha):
+        # Optimization: Don't resolve MILP 3 times. Solve once with mean demand.
+        res = solve_milp(alpha)
+        if res['status'] != 'Optimal': return -np.inf
 
-        if not np.isnan(chg) and abs(chg) > 0.1:
-            box_props = dict(boxstyle="round,pad=0.3", fc="white", ec=line_colors[idx], alpha=0.9)
-            txt = f"{chg:+.1f}%"
-            ax1.annotate(txt, xy=(val, cost), xytext=(0, 15 if chg > 0 else -15),
-                         textcoords='offset points', ha='center', fontsize=9,
-                         color=line_colors[idx], bbox=box_props, fontweight='bold', zorder=25)
+        # Assume Gaussian error around the model's predicted cost (original logic)
+        pred_cost = res['cost']
+        return norm.logpdf(self.obs_mean, loc=pred_cost, scale=self.obs_std * 2.0)
 
-# 保存期刊级图表
-output_file = "50cities_sensitivity_analysis_full_details.png"
-plt.savefig(output_file, dpi=600, bbox_inches='tight', facecolor='white')
-print(f"\nChart saved successfully: {output_file} (600 DPI, Journal Quality)")
-print("=" * 100)
+    def run_mcmc(self, samples=1000, burn=100):
+        print(f"\n[MCMC] Sampling {samples} points (Burn-in={burn})...")
+        print("  Note: Exact MILP is running in the loop. Please wait.")
 
-# 显示图表
-plt.show()
+        chain = []
+        curr_alpha = 0.3 # Start point (original)
+        curr_ll = self.log_likelihood(curr_alpha)
+        curr_prior = beta.logpdf(curr_alpha, 3, 7)
+
+        accepted = 0
+        start_t = time.time()
+
+        for i in range(samples + burn):
+            # Propose new alpha (original step size, keep convergence)
+            prop_alpha = curr_alpha + np.random.normal(0, 0.02)
+            if prop_alpha <= 0.1 or prop_alpha >= 0.5:
+                prop_ll = -np.inf
+            else:
+                prop_ll = self.log_likelihood(prop_alpha)
+
+            prop_prior = beta.logpdf(prop_alpha, 3, 7) if 0<prop_alpha<1 else -np.inf
+
+            # Acceptance Ratio (original Bayesian logic)
+            if prop_ll > -np.inf:
+                ratio = (prop_ll + prop_prior) - (curr_ll + curr_prior)
+                if np.log(np.random.rand()) < ratio:
+                    curr_alpha = prop_alpha
+                    curr_ll = prop_ll
+                    curr_prior = prop_prior
+                    accepted += 1
+
+            if i >= burn:
+                chain.append(curr_alpha)
+
+            # Progress bar (original format, keep user feedback)
+            if i % 5 == 0:
+                elapsed = time.time() - start_t
+                sys.stdout.write(f"\r  >> Iter {i}/{samples+burn} | Acc: {accepted/(i+1):.2%} | Alpha: {curr_alpha:.4f}")
+                sys.stdout.flush()
+
+        print(f"\n  ✓ Done. Total time: {time.time()-start_t:.1f}s")
+        return np.array(chain)
+
+# ==========================================
+# 4. Execution & Visualization (Keep Original Style & Output)
+# ==========================================
+# A. Run Analysis (original parameters, keep consistency)
+bayes = BayesianEngine(true_alpha=0.28)
+bayes.generate_observations(n=5) # Generate synthetic reality (n=5, original)
+posterior = bayes.run_mcmc(samples=1000, burn=100) # Small sample for demo speed, increase for paper
+
+# B. Generate Priors for Plotting (original beta distribution)
+x_axis = np.linspace(0.1, 0.5, 200)
+y_prior = beta.pdf(x_axis, 3, 7)
+
+# C. Calculate Statistics (original metrics, keep academic output)
+post_mean = np.mean(posterior)
+hdi_low, hdi_high = np.percentile(posterior, [2.5, 97.5])
+
+# D. Plotting (Keep original layout, colors, and titles)
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+
+# Plot 1: Parameter Estimation (original style, no layout change)
+ax = axes[0]
+# Prior Curve
+ax.plot(x_axis, y_prior, color=COLORS['prior_line'], lw=2, linestyle='--', label='Prior Belief Beta(3,7)')
+ax.fill_between(x_axis, 0, y_prior, color=COLORS['prior_fill'], alpha=0.3)
+
+# Posterior KDE
+kde = gaussian_kde(posterior)
+y_post = kde(x_axis)
+ax.plot(x_axis, y_post, color=COLORS['post_line'], lw=2.5, label='Posterior Evidence')
+ax.fill_between(x_axis, 0, y_post, color=COLORS['post_fill'], alpha=0.4)
+
+# Annotations (original labels, keep truth line at 0.28)
+ax.axvline(0.28, color=COLORS['truth'], linestyle='-', lw=2, label='True α (0.28)')
+ax.axvline(post_mean, color=COLORS['post_line'], linestyle=':', lw=2)
+
+# HDI Shading (original 95% HDI, keep confidence interval)
+x_hdi = np.linspace(hdi_low, hdi_high, 100)
+ax.fill_between(x_hdi, 0, kde(x_hdi), color=COLORS['ci_shade'], alpha=0.2, label='95% HDI')
+
+ax.set_title("Bayesian Updating of Recovery Rate (α)", fontweight='bold')
+ax.set_xlabel("Recovery Rate")
+ax.set_ylabel("Probability Density")
+ax.legend(loc='upper right', frameon=False)
+
+# Plot 2: Cost Risk Profile (original layout, keep hundred million CNY unit)
+ax = axes[1]
+# Predict costs using posterior alphas (original subset sampling for speed)
+pred_costs = []
+print("\n[Prediction] Generating predictive cost distribution...")
+for a in posterior[::5]: # Sample subset to save time
+    res = solve_milp(a)
+    if res['status']=='Optimal': pred_costs.append(res['cost']/1e8)
+
+# Histogram + KDE (original style, gray histogram)
+ax.hist(pred_costs, bins=10, density=True, alpha=0.3, color='gray', edgecolor='white')
+if len(pred_costs) > 1:
+    kde_cost = gaussian_kde(pred_costs)
+    x_cost = np.linspace(min(pred_costs)*0.98, max(pred_costs)*1.02, 100)
+    ax.plot(x_cost, kde_cost(x_cost), color='#333333', lw=2)
+
+mean_cost = np.mean(pred_costs)
+ax.axvline(mean_cost, color=COLORS['post_line'], lw=2, linestyle='--', label=f'Exp. Cost: {mean_cost:.2f} HM')
+
+ax.set_title("Posterior Predictive Cost Distribution", fontweight='bold')
+ax.set_xlabel("Total Cost (Hundred Million CNY)")
+ax.legend(loc='upper right')
+
+# E. Save (original filename, keep journal quality DPI)
+plt.savefig("50cities_bayesian_journal.png", bbox_inches='tight')
+print(f"\n[Output] Visualization saved to '50cities_bayesian_journal.png'")
+
+# F. Print Table (original format, keep statistics output)
+print("\n" + "="*50)
+print(f"{'BAYESIAN INFERENCE STATISTICS':^50}")
+print("="*50)
+df_stats = pd.DataFrame({
+    'Metric': ['Mean Alpha', 'Median Alpha', '95% HDI Lower', '95% HDI Upper', 'Exp. Cost (HM)'],
+    'Value': [post_mean, np.median(posterior), hdi_low, hdi_high, mean_cost]
+})
+print(df_stats.to_string(index=False, float_format="%.4f"))
+print("-" * 50)
+print("  Note: 'HM' = Hundred Million CNY | HDI = Highest Density Interval")
