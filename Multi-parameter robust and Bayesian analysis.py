@@ -21,7 +21,7 @@ import warnings
 # 0. Global Configuration (Journal Style)
 # ==========================================
 warnings.filterwarnings('ignore')
-np.random.seed(2025)
+np.random.seed(2025)  # 固定种子，保证结果可复现（论文要求）
 
 plt.rcParams.update({
     'font.family': 'sans-serif',
@@ -50,16 +50,16 @@ COLORS = {
 }
 
 # ==========================================
-# 1. Data Generation (50 Cities Logic)
+# 1. Data Generation (50 Cities Logic) - Aligned with Revised Model
 # ==========================================
 def prepare_50cities_data():
-    # Base Parameters (2025 Calibration)
+    # Base Parameters (2025 Calibration - MATCH REVISED MODEL)
     NATIONAL_SALES = 12866000
     TOTAL_RETIRED = 820000
     UNIT_WEIGHT = 0.5
     TOTAL_UNITS = TOTAL_RETIRED / UNIT_WEIGHT
 
-    # 50 Cities Weights (Top 50 from China Auto Industry)
+    # 50 Cities Weights (Top 50 from China Auto Industry - Unchanged)
     city_weights = [
         ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
         ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
@@ -76,26 +76,29 @@ def prepare_50cities_data():
         ("Zhongshan", 0.198), ("Jiaxing", 0.197)
     ]
 
-    # --- Coordinates Setup (Crucial for Feasibility) ---
-    # We map 50 cities to real geographic clusters to ensure distance constraints < 600km are valid
-    # Anchors: Beijing(N), Shanghai(E), Guangzhou(S), Chengdu(W), Wuhan(C)
-    anchors = {
-        "Beijing": (39.9, 116.4), "Shanghai": (31.2, 121.5), "Guangzhou": (23.1, 113.3),
-        "Chengdu": (30.6, 104.1), "Wuhan": (30.6, 114.3), "XiAn": (34.3, 108.9),
-        "Shenyang": (41.8, 123.4), "Kunming": (25.0, 102.7)
+    # --- Coordinates Setup (Exact from Revised Model - Crucial for Distance Constraints) ---
+    # 修正：使用论文中真实精确坐标，不再随机偏移，保证600km辐射半径约束有效
+    city_coords = {
+        "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
+        "Shanghai": (31.23, 121.47), "Beijing": (39.90, 116.40), "Guangzhou": (23.13, 113.26),
+        "Zhengzhou": (34.76, 113.65), "Chongqing": (29.56, 106.55), "XiAn": (34.34, 108.94),
+        "Tianjin": (39.13, 117.20), "Wuhan": (30.59, 114.30), "Suzhou": (31.30, 120.58),
+        "Hefei": (31.82, 117.22), "Wuxi": (31.57, 120.30), "Ningbo": (29.82, 121.55),
+        "Dongguan": (23.05, 113.75), "Nanjing": (32.05, 118.78), "Changsha": (28.23, 112.94),
+        "Wenzhou": (28.00, 120.70), "Shijiazhuang": (38.04, 114.51), "Jinan": (36.65, 117.12),
+        "Foshan": (23.02, 113.12), "Qingdao": (36.07, 120.38), "Changchun": (43.88, 125.32),
+        "Shenyang": (41.80, 123.43), "Nanning": (22.82, 108.32), "Taiyuan": (37.87, 112.55),
+        "Kunming": (25.04, 102.71), "Linyi": (35.05, 118.35), "Taizhou": (28.66, 121.42),
+        "Jinhua": (29.08, 119.65), "Xuzhou": (34.26, 117.28), "Haikou": (20.02, 110.35),
+        "Jining": (35.42, 116.59), "Xiamen": (24.48, 118.08), "Baoding": (38.87, 115.48),
+        "Nanchang": (28.68, 115.86), "Changzhou": (31.78, 119.95), "Guiyang": (26.64, 106.63),
+        "Luoyang": (34.62, 112.45), "Tangshan": (39.63, 118.18), "Nantong": (32.01, 120.86),
+        "Haerbin": (45.80, 126.53), "Handan": (36.61, 114.49), "Weifang": (36.71, 119.16),
+        "Wulumuqi": (43.83, 87.62), "Quanzhou": (24.87, 118.68), "Fuzhou": (26.08, 119.30),
+        "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
     }
 
-    city_coords = {}
-    for i, (city, _) in enumerate(city_weights):
-        if city in anchors:
-            city_coords[city] = anchors[city]
-        else:
-            # Assign non-anchor cities to random nearby clusters to simulate realistic density
-            ref_city = list(anchors.keys())[i % len(anchors)]
-            base_lat, base_lon = anchors[ref_city]
-            # Random offset within ~300km (approx 3 degrees)
-            city_coords[city] = (base_lat + np.random.uniform(-3, 3), base_lon + np.random.uniform(-3, 3))
-
+    # 22 Recyclers (Exact from Revised Model - Fixed Cost Calibration: Cost × 3000)
     recycler_cfg = [
         ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
         ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
@@ -110,13 +113,14 @@ def prepare_50cities_data():
         ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
     ]
 
+    # 6 Factories (Exact from Revised Model)
     factory_cfg = [
         ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
         ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
         ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
     ]
 
-    # Demand Calc
+    # Demand Calculation (Aligned with Revised Model - No Change)
     total_w = sum(w for _, w in city_weights)
     ratio = total_w / len(city_weights)
     actual_sales = NATIONAL_SALES * ratio
@@ -125,6 +129,7 @@ def prepare_50cities_data():
     for c, w in city_weights:
         city_demand[c] = int(TOTAL_UNITS * (actual_sales * (w/total_w) / NATIONAL_SALES))
 
+    # Set Collections & Locations
     markets = [f"M_{c}" for c, _ in city_weights]
     factories = [f"F_{c}" for c, _ in factory_cfg]
     candidates = [f"R_{c}" for c, _, _ in recycler_cfg]
@@ -134,26 +139,28 @@ def prepare_50cities_data():
     for c, pos in city_coords.items(): locations[f"M_{c}"] = pos
     for c, pos, _ in recycler_cfg: locations[f"R_{c}"] = pos
 
-    fixed_cost = {f"R_{c}": cost * 10000 for c, _, cost in recycler_cfg}
+    # 修正：固定成本对齐修订模型 - F_k = Cost × 3000 (论文表\ref{tab:parameters})
+    fixed_cost = {f"R_{c}": cost * 3000 for c, _, cost in recycler_cfg}
     demand_base = {f"M_{c}": city_demand[c] for c, _ in city_weights}
-    demand_uncert = {k: v * 0.2 for k, v in demand_base.items()}
+    demand_uncert = {k: v * 0.2 for k, v in demand_base.items()}  # 20%波动量，匹配修订模型
 
     return markets, factories, candidates, locations, fixed_cost, demand_base, demand_uncert
 
-# Initialize Data
+# Initialize Data (Aligned with Revised Model)
 markets, factories, candidates, locations, fixed_cost, demand_base, demand_uncert = prepare_50cities_data()
 
 # ==========================================
-# 2. Exact MILP Model (With Soft Constraints)
+# 2. Exact MILP Model (Aligned with Revised Model - Key Modifications)
 # ==========================================
 def get_dist(n1, n2):
+    """Calculate distance (km) between two nodes - Exact from Revised Model"""
     p1, p2 = locations[n1], locations[n2]
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) * 100
 
 def solve_exact_milp(params):
     """
     Solves the 50-city CLSC problem accurately using PuLP.
-    Includes 'slack' variables for demand to ensure feasibility even under extreme parameters.
+    Aligned with Revised Mathematical Model (§\ref{sec:model}) - No Soft Constraints (Match Paper)
     """
     # Unpack Parameters
     alpha = params['alpha']
@@ -161,65 +168,82 @@ def solve_exact_milp(params):
     cap = params['carbon_cap']
     capacity = params['capacity']
 
-    TRANS_COST = 1.6
-    CARBON_FACTOR = 0.0004
-    MAX_DIST = 600
-    GAMMA = 1.0
-    PENALTY = 20000 # Cost per unit for unmet recovery (Soft Constraint)
+    # 修正：对齐修订模型基准参数 (表\ref{tab:parameters})
+    TRANS_COST = 1.6  # 单位距离单位流量运输成本 (CNY/unit·km)
+    FWD_CARBON_FACTOR = 0.0004  # 正向物流碳排放因子 (tCO2/unit·km)
+    REV_CARBON_FACTOR = 0.0030  # 逆向物流碳排放因子 (tCO2/unit·km) - 新增，区分正/逆向
+    MAX_DIST = 600  # 逆向物流最大辐射半径 (km)
+    GAMMA = 1.0  # 鲁棒系数，最坏情形需求
 
-    prob = pulp.LpProblem("CLSC_Exact", pulp.LpMinimize)
+    prob = pulp.LpProblem("CLSC_Exact_Revised", pulp.LpMinimize)
 
-    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')
-    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')
-    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')
-    excess_e = pulp.LpVariable("ExcE", 0, cat='Continuous')
-    # Slack variable for unmet recovery (Ensures model is always feasible)
-    slack = pulp.LpVariable.dicts("Slack", markets, 0, cat='Continuous')
+    # Decision Variables (Aligned with Revised Model)
+    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')  # 正向流量
+    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')  # 逆向流量
+    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')  # 回收中心建设决策
+    excess_e = pulp.LpVariable("ExcE", 0, cat='Continuous')  # 超额碳排放辅助变量
 
+    # 修正：目标函数 - 对齐修订模型，无松弛惩罚项（论文模型无软约束）
+    # 1. 运输成本（正+逆向）
     cost_trans = pulp.lpSum([x[i][j]*get_dist(i,j)*TRANS_COST for i in factories for j in markets]) + \
                  pulp.lpSum([z[j][k]*get_dist(j,k)*TRANS_COST for j in markets for k in candidates])
 
-    emission = pulp.lpSum([x[i][j]*get_dist(i,j)*CARBON_FACTOR for i in factories for j in markets]) + \
-               pulp.lpSum([z[j][k]*get_dist(j,k)*CARBON_FACTOR for j in markets for k in candidates])
+    # 2. 碳排放成本（仅超额部分征税）
+    # 修正：分离正/逆向碳排放计算，匹配修订模型约束4
+    emission = pulp.lpSum([x[i][j]*get_dist(i,j)*FWD_CARBON_FACTOR for i in factories for j in markets]) + \
+               pulp.lpSum([z[j][k]*get_dist(j,k)*REV_CARBON_FACTOR for j in markets for k in candidates])
 
+    # 3. 固定建设成本
     cost_fixed = pulp.lpSum([fixed_cost[k]*y[k] for k in candidates])
-    cost_penalty = pulp.lpSum([slack[j] * PENALTY for j in markets])
 
-    # Total Cost = Fixed + Trans + CarbonTax + Penalty
-    prob += cost_fixed + cost_trans + excess_e * tax + cost_penalty
+    # 总目标函数：最小化固定成本+运输成本+碳税成本
+    prob += cost_fixed + cost_trans + excess_e * tax
 
+    # 约束条件（严格对齐修订模型§\ref{subsec:model_formulation}）
+    # 1. 碳配额约束：超额排放 ≤ excess_e
     prob += excess_e >= emission - cap
 
+    # 2. 鲁棒需求覆盖约束：正向供应 ≥ 基础需求+γ×波动需求
     for j in markets:
         d_robust = demand_base[j] + GAMMA * demand_uncert[j]
         prob += pulp.lpSum([x[i][j] for i in factories]) >= d_robust
 
-        # Recovery Constraint with Slack: (Recycled + Slack) >= Demand * Alpha
-        prob += pulp.lpSum([z[j][k] for k in candidates]) + slack[j] >= demand_base[j] * alpha
+        # 3. 回收政策约束：逆向回收 ≥ 基础需求×α
+        prob += pulp.lpSum([z[j][k] for k in candidates]) >= demand_base[j] * alpha
 
+        # 4. 地理辐射约束：距离>600km时，逆向流量=0
         for k in candidates:
-            if get_dist(j, k) > MAX_DIST: prob += z[j][k] == 0
+            if get_dist(j, k) > MAX_DIST:
+                prob += z[j][k] == 0
 
+    # 5. 回收中心容量约束：总回收量 ≤ 建设容量×y_k
     for k in candidates:
         prob += pulp.lpSum([z[j][k] for j in markets]) <= capacity * y[k]
 
+    # 求解MILP（安静模式，不输出冗余日志）
     prob.solve(pulp.PULP_CBC_CMD(msg=False))
 
+    # 返回最优解成本
     if pulp.LpStatus[prob.status] == 'Optimal':
-        # Return real objective value
         return pulp.value(prob.objective)
     else:
         return np.nan
 
 # ==========================================
-# 3. Simulation Logic: Bayes vs Robust
+# 3. Simulation Logic: Bayes vs Robust (Keep Original Style)
 # ==========================================
 print("="*60)
 print("  SIMULATION START: BAYESIAN VS ROBUST (50 CITIES)")
 print("="*60)
 
 N_SIMS = 1000
-BASE_PARAMS = {'alpha': 0.28, 'carbon_tax': 65, 'carbon_cap': 1500000, 'capacity': 80000}
+# 修正：基准参数对齐修订模型（表\ref{tab:parameters}）
+BASE_PARAMS = {
+    'alpha': 0.28,        # 法定回收率
+    'carbon_tax': 65,     # 碳税率（CNY/tCO2）
+    'carbon_cap': 100000, # 免费碳配额（tCO2）- 修正：从150万改为10万，匹配修订模型
+    'capacity': 80000     # 单个回收中心处理能力（unit）
+}
 
 # Store detailed results for insights
 results_log = []
@@ -232,9 +256,9 @@ start_t = time.time()
 for i in range(N_SIMS):
     p = BASE_PARAMS.copy()
     # Wide Uniform Distributions (Representing Ignorance/Conservatism)
-    p['alpha'] = np.random.uniform(0.196, 0.364) # +/- 30%
+    p['alpha'] = np.random.uniform(0.196, 0.364)  # +/- 30%
     p['carbon_tax'] = np.random.uniform(45.5, 84.5)
-    p['carbon_cap'] = np.random.uniform(1050000, 1950000)
+    p['carbon_cap'] = np.random.uniform(70000, 130000)  # 修正：对应基准10万的±30%
 
     cost = solve_exact_milp(p)
 
@@ -246,7 +270,7 @@ for i in range(N_SIMS):
         sys.stdout.write(f"\r  >> Progress: {i/N_SIMS:.0%}")
         sys.stdout.flush()
 
-# 修正：进度条完成后换行，格式更整洁
+# 进度条完成后换行，格式整洁
 print(f"\r  >> DONE. Robust Valid: {len(robust_costs)}")
 sys.stdout.write("\n")
 
@@ -262,10 +286,10 @@ np.random.seed(999)
 for i in range(N_SIMS):
     p = BASE_PARAMS.copy()
 
-    # Tighter Distributions (Representing Information Gain)
-    p['alpha'] = beta.rvs(100, 257) # Mean 0.28, Std ~0.02
+    # Tighter Distributions (Representing Information Gain - Aligned with Revised Model)
+    p['alpha'] = beta.rvs(100, 257)  # Mean 0.28, Std ~0.02 (Match Bayesian Results)
     p['carbon_tax'] = np.random.normal(65, 2.0)
-    p['carbon_cap'] = np.random.normal(1500000, 50000)
+    p['carbon_cap'] = np.random.normal(100000, 5000)  # 修正：对应基准10万，标准差5000
 
     bayes_alphas.append(p['alpha'])
     bayes_taxes.append(p['carbon_tax'])
@@ -280,19 +304,19 @@ for i in range(N_SIMS):
         sys.stdout.write(f"\r  >> Progress: {i/N_SIMS:.0%}")
         sys.stdout.flush()
 
-# 修正：进度条完成后换行，格式更整洁
+# 进度条完成后换行，格式整洁
 print(f"\r  >> DONE. Bayes Valid: {len(bayes_costs)}")
 sys.stdout.write("\n")
 
 # ==========================================
-# 4. Visualization & Reporting
+# 4. Visualization & Reporting (Keep Original Style)
 # ==========================================
 print("\n[3/3] Generating Visualizations...")
 
 rob_data = np.array(robust_costs) / 1e8
 bay_data = np.array(bayes_costs) / 1e8
 
-# Figure 1: Risk Profile
+# Figure 1: Risk Profile (Keep Original Style)
 fig1, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
 x_eval = np.linspace(min(np.min(rob_data), np.min(bay_data))*0.95,
@@ -329,17 +353,18 @@ ax.grid(axis='y', linestyle='--', alpha=0.3)
 
 plt.savefig("50cities_risk_profile.png", bbox_inches='tight')
 
-# Figure 2: Parameters
+# Figure 2: Parameters (Keep Original Style - Adjust Carbon Cap for Revised Model)
 fig2, axes = plt.subplots(1, 3, figsize=(15, 4.5), constrained_layout=True)
 fig2.suptitle(r"$\bf{Posterior\ Distributions\ of\ Key\ Parameters}$", y=1.05)
 
 def custom_formatter(fmt):
     return plt.FuncFormatter(lambda x, p: fmt.format(x))
 
+# 修正：碳配额数据格式，匹配修订模型的10万基准值
 plot_data = [
     (bayes_alphas, 0.28, r'Recovery Rate ($\alpha$)', COLORS['bayes_line'], '{:.2f}'),
     (bayes_taxes, 65, r'Carbon Tax ($C_{tax}$)', COLORS['baseline'], '{:.0f}'),
-    (np.array(bayes_caps)/10000, 150, r'Carbon Cap ($10^4$ tons)', '#984EA3', '{:.0f}')
+    (np.array(bayes_caps)/1000, 100, r'Carbon Cap ($10^3$ tons)', '#984EA3', '{:.0f}')  # 修正：从10^4改为10^3，匹配10万基准
 ]
 
 titles = ['(a) Recovery Rate', '(b) Carbon Tax', '(c) Carbon Cap']
@@ -370,7 +395,7 @@ for i, (data, base, label, col, fmt) in enumerate(plot_data):
 plt.savefig("50cities_parameter_posteriors.png", bbox_inches='tight')
 
 # ==========================================
-# 5. Final Reporting (Enhanced & Fixed for Paper Support)
+# 5. Final Reporting (Enhanced & Aligned with Revised Model)
 # ==========================================
 print("\n" + "="*60)
 print(f"{'SIMULATION STATISTICS SUMMARY':^60}")
@@ -395,7 +420,7 @@ print("="*60)
 
 df_logs = pd.DataFrame(results_log)
 
-# 1. Fixed: Extreme Case Attribution (修正税负极性表述，补充对比)
+# 1. Extreme Case Attribution (Aligned with Revised Model)
 worst_robust = df_logs[df_logs['Method']=='Robust'].sort_values('Cost', ascending=False).iloc[0]
 best_robust = df_logs[df_logs['Method']=='Robust'].sort_values('Cost', ascending=True).iloc[0]
 worst_bayes = df_logs[df_logs['Method']=='Bayesian'].sort_values('Cost', ascending=False).iloc[0]
@@ -409,8 +434,8 @@ print(f"    - Carbon Tax: {worst_robust['Tax']:.1f} (vs Baseline 65) → {tax_tr
 print(f"  > Bayesian Worst Case: {worst_bayes['Cost']:.3f} HM CNY (Gap vs Robust: {worst_robust['Cost']-worst_bayes['Cost']:.3f} HM CNY)")
 print(f"  > Robust Best Case: {best_robust['Cost']:.3f} HM CNY (Alpha: {best_robust['Alpha']:.3f}, Tax: {best_robust['Tax']:.1f})")
 
-# 2. Fixed: Risk Probability Analysis (自动计算合理阈值，避免100%无意义结果)
-risk_threshold = np.percentile(rob_data, 75) + 0.1  # 基于Robust 75分位数+0.1，适配仿真结果
+# 2. Risk Probability Analysis (Auto Calibrated Threshold)
+risk_threshold = np.percentile(rob_data, 75) + 0.1  # Based on Robust 75th Percentile
 high_risk_rob = len(df_logs[(df_logs['Method']=='Robust') & (df_logs['Cost']>risk_threshold)]) / len(df_logs[df_logs['Method']=='Robust']) * 100
 high_risk_bay = len(df_logs[(df_logs['Method']=='Bayesian') & (df_logs['Cost']>risk_threshold)]) / len(df_logs[df_logs['Method']=='Bayesian']) * 100
 
@@ -420,7 +445,7 @@ print(f"  > Bayesian Strategy High Risk Rate: {high_risk_bay:.1f}%")
 risk_reduction = high_risk_rob - high_risk_bay
 print(f"  > Insight: Bayesian inference reduces high-risk tail events by {risk_reduction:.1f} percentage points, improving cost stability.")
 
-# 3. Core Conclusion
+# 3. Core Conclusion (Aligned with Revised Model Results)
 print(f"\n[3. Core Finding]")
 print(f"  > Uncertainty Reduction (Bayes vs Robust): +{reduction:.1f}% (narrower 95% CI, more precise cost prediction)")
 
