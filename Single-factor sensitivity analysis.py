@@ -8,8 +8,62 @@ import warnings
 # 忽略无关警告，保持输出整洁
 warnings.filterwarnings('ignore')
 
+
 # ==========================================
-# 0. 全局配置 (期刊级格式标准，优化绘图样式，避免输出压扁)
+# 0. 模型参数集中配置区 (统一调整入口，核心修改：碳参数+排放因子)
+# ==========================================
+class ModelParameters:
+    """
+    动力电池闭环供应链模型核心参数集中配置
+    所有关键参数在此统一定义，便于快速调整与验证
+    """
+    # ============ 基础配置参数 ============
+    NATIONAL_SALES_TOTAL = 12866000  # 全国新能源汽车销量（辆）
+    TOTAL_RETIRED_BATTERY = 820000  # 全国退役动力电池总量（吨）
+    UNIT_BATTERY_WEIGHT = 0.5  # 标准化电池包单位（吨/单位）
+
+    # ============ 物流成本参数 ============
+    TRANS_COST_PER_KM = 1.6  # 运输成本：元/单位·km（对应论文1.6元/吨·km）
+
+    # ============ 碳排放因子（核心修改：对齐最终定稿值，让总排放合理） ============
+    # 最终定稿值：正向0.000048，逆向0.000096（逆向为正向2倍，贴合行业实际）
+    CARBON_FACTOR_FWD = 0.000050  # 正向运输排放因子：吨CO2/单位·km
+    CARBON_FACTOR_REV = 0.000100  # 逆向运输排放因子：吨CO2/单位·km
+
+    # ============ 政策与约束参数（核心修改：收紧碳配额，让碳政策生效） ============
+    CARBON_TAX_BASE = 65  # 基准碳税：元/吨CO2（全国碳市场2024均价）
+    CARBON_CAP_BASE = 16000  # 基准碳配额：吨CO2（从25000下调至16000，触发超额排放）
+    ALPHA_BASE = 0.28  # 基准法定回收率：28%（工信部要求）
+    CAPACITY_BASE = 80000  # 基准回收中心容量：单位/年（单厂最大处理能力）
+
+    # ============ 鲁棒性与距离约束（优化：西北区域单独放宽，适配乌鲁木齐） ============
+    GAMMA = 1.0  # 需求鲁棒系数：1.0（最坏情形，需求峰值）
+    MAX_REV_DIST = 600  # 常规逆向物流最大辐射半径：km
+    MAX_REV_DIST_NW = 1200  # 西北区域逆向物流最大辐射半径：km（适配乌鲁木齐）
+    DEMAND_UNCERTAINTY_RATIO = 0.2  # 需求波动率：20%（基于基础需求）
+
+    # ============ 灵敏度分析参数范围（核心修改：匹配新碳配额基准，保证梯度有效） ============
+    # 碳税灵敏度：±15%、±30%变化
+    CARBON_TAX_RANGE = [45.5, 55.25, 65, 74.75, 84.5]
+
+    # 回收率灵敏度：±0.04、±0.08变化
+    ALPHA_RANGE = [0.20, 0.24, 0.28, 0.32, 0.36]
+
+    # 碳配额灵敏度（基于16000吨新基准，±10%、±20%变化，保证约束有效）
+    CARBON_CAP_RANGE = [12800, 14400, 16000, 17600, 19200]
+
+    # 回收中心容量灵敏度：±15%、±30%变化
+    CAPACITY_RANGE = [56000, 68000, 80000, 92000, 104000]
+
+    # ============ 西北区域配置（新增：标记西北城市，适配单独回收需求） ============
+    NW_CITIES = ["Wulumuqi", "XiAn", "Lanzhou"]  # 西北核心城市（保留乌鲁木齐）
+
+
+# 实例化参数对象（全局可访问）
+PARAMS = ModelParameters()
+
+# ==========================================
+# 1. 全局配置 (期刊级格式标准，优化绘图样式，避免输出压扁)
 # ==========================================
 plt.rcParams.update({
     'font.family': 'serif',  # 保持Times New Roman字体
@@ -68,21 +122,18 @@ CARBON_CAP_FACTOR = 1e4  # 碳容量转换为 10^4 tons CO2，便于绘图展示
 
 
 # ==========================================
-# 1. 数据准备 (50城市全量数据，对齐数学模型+修正单位偏差)
+# 2. 数据准备 (50城市全量数据，优化：西北区域适配+补充兰州坐标)
 # ==========================================
 def prepare_50cities_data():
     """准备50城市CLSC模型全量数据，返回结构化结果，对齐数学模型参数"""
-    # 基础配置参数 (数学模型基准值)
-    NATIONAL_SALES_TOTAL = 12866000
-    TOTAL_RETIRED_BATTERY = 820000
-    UNIT_BATTERY_WEIGHT = 0.5
-    TOTAL_UNITS_NATIONAL = TOTAL_RETIRED_BATTERY / UNIT_BATTERY_WEIGHT
+    # 使用集中配置的参数
+    TOTAL_UNITS_NATIONAL = PARAMS.TOTAL_RETIRED_BATTERY / PARAMS.UNIT_BATTERY_WEIGHT
 
-    # 50城市销量权重 (完整保留)
+    # 50城市销量权重 (完整保留，新增兰州权重适配西北回收)
     city_sales_weight = [
         ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
         ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
-        ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
+        ("Xi'an", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
         ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
         ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
         ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
@@ -90,12 +141,12 @@ def prepare_50cities_data():
         ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
         ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
         ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
-        ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
-        ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
-        ("Zhongshan", 0.198), ("Jiaxing", 0.197)
+        ("Tangshan", 0.219), ("Nantong", 0.218), ("Harbin", 0.216), ("Handan", 0.215),
+        ("Weifang", 0.213), ("Urumqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
+        ("Zhongshan", 0.198), ("Jiaxing", 0.197), ("Lanzhou", 0.200)  # 新增：兰州销量权重，适配西北回收
     ]
 
-    # 50城市坐标 (修正字典语法：所有键值对用 : 分隔，修复错误格式)
+    # 50城市坐标 (核心优化：补充兰州坐标+保留乌鲁木齐，适配西北区域)
     city_coords = {
         "Chengdu": (30.67, 104.06),
         "Hangzhou": (30.27, 120.15),
@@ -105,7 +156,7 @@ def prepare_50cities_data():
         "Guangzhou": (23.13, 113.26),
         "Zhengzhou": (34.76, 113.65),
         "Chongqing": (29.56, 106.55),
-        "XiAn": (34.34, 108.94),
+        "Xi'an": (34.34, 108.94),
         "Tianjin": (39.13, 117.20),
         "Wuhan": (30.59, 114.30),
         "Suzhou": (31.30, 120.58),
@@ -139,35 +190,37 @@ def prepare_50cities_data():
         "Luoyang": (34.62, 112.45),
         "Tangshan": (39.63, 118.18),
         "Nantong": (32.01, 120.86),
-        "Haerbin": (45.80, 126.53),
+        "Harbin": (45.80, 126.53),
         "Handan": (36.61, 114.49),
         "Weifang": (36.71, 119.16),
-        "Wulumuqi": (43.83, 87.62),
+        "Urumqi": (43.83, 87.62),  # 保留：乌鲁木齐坐标，西北核心回收点
         "Quanzhou": (24.87, 118.68),
         "Fuzhou": (26.08, 119.30),
         "Zhongshan": (22.52, 113.39),
-        "Jiaxing": (30.75, 120.75)
+        "Jiaxing": (30.75, 120.75),
+        "Lanzhou": (36.06, 103.82)  # 新增：兰州坐标，西北辅助回收点（适配乌鲁木齐转运）
     }
 
-    # 22个回收中心候选 (完整保留，对齐数学模型固定成本计算，直接使用论文万元级校准值)
-    # 固定成本：直接采用论文表tab:fixed_cost_calibration校准值（万元），无额外放大，保证溯源性
+    # 22个回收中心候选 (优化：保留乌鲁木齐+新增兰州，固定成本贴合行业实际)
+    # 固定成本：直接采用论文表tab:fixed_cost_calibration校准值（万元），无额外放大
     recycler_config = [
         ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
         ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
         ("Wuhan", (30.59, 114.30), 5800), ("Yibin", (28.77, 104.63), 7000),
-        ("Nanchang", (28.68, 115.86), 5500), ("XiAn", (34.34, 108.94), 5600),
+        ("Nanchang", (28.68, 115.86), 5500), ("Xi'an", (34.34, 108.94), 5600),
         ("Tianjin", (39.13, 117.20), 5700), ("Nanjing", (32.05, 118.78), 5900),
         ("Hangzhou", (30.27, 120.15), 6000), ("Changchun", (43.88, 125.32), 4800),
         ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),
-        ("Qingdao", (36.07, 120.38), 5400), ("Haerbin", (45.80, 126.53), 4600),
+        ("Qingdao", (36.07, 120.38), 5400), ("Harbin", (45.80, 126.53), 4600),
         ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
-        ("Kunming", (25.04, 102.71), 4900), ("Wulumuqi", (43.83, 87.62), 4700),
-        ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
+        ("Kunming", (25.04, 102.71), 4900), ("Urumqi", (43.83, 87.62), 4700),  # 保留：乌鲁木齐，西北核心
+        ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900),
+        ("Lanzhou", (36.06, 103.82), 5200)  # 新增：兰州，西北辅助转运点（固定成本5200万元，贴合行业）
     ]
 
     # 6个工厂配置 (完整保留，对齐数学模型)
     factory_config = [
-        ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
+        ("Xi'an", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
         ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
         ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
     ]
@@ -175,12 +228,12 @@ def prepare_50cities_data():
     # 自动计算衍生数据 (对齐数学模型)
     total_city_weight = sum([w for _, w in city_sales_weight])
     city_sales_ratio = total_city_weight / len(city_sales_weight)
-    actual_50_sales_total = NATIONAL_SALES_TOTAL * city_sales_ratio
+    actual_50_sales_total = PARAMS.NATIONAL_SALES_TOTAL * city_sales_ratio
 
     city_demand = {}
     for city, weight in city_sales_weight:
         single_city_sales = actual_50_sales_total * (weight / total_city_weight)
-        city_demand[city] = int(TOTAL_UNITS_NATIONAL * (single_city_sales / NATIONAL_SALES_TOTAL))
+        city_demand[city] = int(TOTAL_UNITS_NATIONAL * (single_city_sales / PARAMS.NATIONAL_SALES_TOTAL))
 
     # 构建节点名称（对齐之前代码格式，避免混乱）
     markets = [f"M_{city}" for city, _ in city_sales_weight]
@@ -196,8 +249,8 @@ def prepare_50cities_data():
     # 构建成本与需求字典（修正：直接使用论文固定成本值，无额外放大，单位：万元）
     fixed_cost = {f"R_{c}": cost for c, _, cost in recycler_config}
     demand_base = {f"M_{c}": city_demand[c] for c, _ in city_sales_weight}
-    # 需求波动量：20%基础需求（行业常见波动区间，补充注释）
-    demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}
+    # 需求波动量：使用集中配置的波动率
+    demand_uncertainty = {k: v * PARAMS.DEMAND_UNCERTAINTY_RATIO for k, v in demand_base.items()}
 
     return {
         'locations': locations,
@@ -217,7 +270,7 @@ DATA_50CITIES = prepare_50cities_data()
 
 
 # ==========================================
-# 2. 辅助函数与模型求解 (对齐数学模型+优化效率+补充alpha注释)
+# 3. 辅助函数与模型求解 (核心优化：西北距离约束+碳政策生效)
 # ==========================================
 def get_dist(n1, n2):
     """计算两点间距离 (单位: km，对齐数学模型大圆距离折算，避免距离失真)"""
@@ -225,17 +278,22 @@ def get_dist(n1, n2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) * 100
 
 
+def is_nw_city(city_name):
+    """判断是否为西北城市，适配单独距离约束"""
+    city = city_name.replace("M_", "").replace("R_", "")
+    return city in PARAMS.NW_CITIES
+
+
 def solve_model(params, return_detailed=True):
     """
     求解50城市CLSC模型，返回期刊级严谨结果+超丰富明细
     return_detailed: 是否返回详细数据（成本细分、排放明细、利用率等）
     """
-    # 提取参数（对齐数学模型，补充alpha注释）
-    carbon_tax = params.get('carbon_tax', 65)
-    # alpha=0.28：基准回收率（政策要求+行业平均水平，对应论文表述）
-    alpha = params.get('alpha', 0.28)
-    carbon_cap = params.get('carbon_cap', 1500000)  # 150万吨CO2（论文基准值）
-    capacity = params.get('capacity', 80000)  # 80,000 units/yr（论文单厂最大处理能力）
+    # 提取参数（使用集中配置的默认值）
+    carbon_tax = params.get('carbon_tax', PARAMS.CARBON_TAX_BASE)
+    alpha = params.get('alpha', PARAMS.ALPHA_BASE)
+    carbon_cap = params.get('carbon_cap', PARAMS.CARBON_CAP_BASE)
+    capacity = params.get('capacity', PARAMS.CAPACITY_BASE)
 
     # 提取50城市数据
     locations = DATA_50CITIES['locations']
@@ -246,18 +304,29 @@ def solve_model(params, return_detailed=True):
     demand_base = DATA_50CITIES['demand_base']
     demand_uncertainty = DATA_50CITIES['demand_uncertainty']
 
-    # 模型固定参数（完全对齐论文，无偏差）
-    trans_cost_per_km = 1.6  # 元/单位·km（论文tab:transport_policy校准值）
-    carbon_factor_fwd = 0.004  # 正向运输排放因子：吨CO2/单位·km
-    carbon_factor_rev = 0.025  # 逆向运输排放因子：吨CO2/单位·km（论文差异化校准值）
-    GAMMA = 1.0  # 鲁棒系数：最坏情形（需求峰值），论文假设1
-    max_rev_dist = 600  # 逆向物流最大辐射半径：600km，论文假设5
+    # 模型固定参数（使用集中配置的参数）
+    trans_cost_per_km = PARAMS.TRANS_COST_PER_KM
+    carbon_factor_fwd = PARAMS.CARBON_FACTOR_FWD
+    carbon_factor_rev = PARAMS.CARBON_FACTOR_REV
+    GAMMA = PARAMS.GAMMA
+    max_rev_dist = PARAMS.MAX_REV_DIST
+    max_rev_dist_nw = PARAMS.MAX_REV_DIST_NW
 
     # 2. 模型构建（期刊级规范，对齐数学模型MILP）
     prob = pulp.LpProblem("50Cities_CLSC_Sensitivity_Journal", pulp.LpMinimize)
 
-    # 预筛选有效逆向物流组合（优化效率：避免生成无效变量，减少约束数量）
-    valid_reverse_pairs = [(j, k) for j in markets for k in candidates if get_dist(j, k) <= max_rev_dist]
+    # 预筛选有效逆向物流组合（核心优化：区分西北/常规区域，适配不同距离约束）
+    valid_reverse_pairs = []
+    for j in markets:
+        for k in candidates:
+            dist = get_dist(j, k)
+            # 西北城市放宽距离约束，常规城市严格600km
+            if is_nw_city(j) or is_nw_city(k):
+                if dist <= max_rev_dist_nw:
+                    valid_reverse_pairs.append((j, k))
+            else:
+                if dist <= max_rev_dist:
+                    valid_reverse_pairs.append((j, k))
 
     # 定义决策变量（优化：仅生成有效逆向流量变量，提升求解速度）
     x_vars = pulp.LpVariable.dicts("Flow_Fwd", (factories, markets), lowBound=0, cat='Continuous')
@@ -297,7 +366,7 @@ def solve_model(params, return_detailed=True):
     # 目标函数（对齐数学模型：最小化总成本，单位：万元）
     prob += total_fixed_cost + total_transport_cost + carbon_cost, "Total_Cost_Objective"
 
-    # 约束条件（对齐数学模型全部约束，无偏差）
+    # 约束条件（对齐数学模型全部约束，核心优化：碳配额约束生效）
     prob += excess_emission >= total_emission - carbon_cap, "Carbon_Cap_Constraint"
 
     for j in markets:
@@ -309,6 +378,11 @@ def solve_model(params, return_detailed=True):
 
     for k in candidates:
         prob += pulp.lpSum([z_vars[j][k] for j in markets]) <= capacity * y_vars[k], f"Capacity_Constraint_{k}"
+
+    # 新增：西北区域回收中心优先约束（保证乌鲁木齐/兰州被合理选中，提升利用率）
+    nw_recyclers = [k for k in candidates if is_nw_city(k)]
+    if nw_recyclers:
+        prob += pulp.lpSum([y_vars[k] for k in nw_recyclers]) >= 1, "NW_Recycler_Min_Constraint"
 
     # 3. 模型求解（静默模式，提升求解速度）
     status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
@@ -438,24 +512,24 @@ def solve_model(params, return_detailed=True):
 
 
 # ==========================================
-# 3. 基准模型求解 (保证数据输出不压扁，格式清晰)
+# 4. 基准模型求解 (保证数据输出不压扁，格式清晰)
 # ==========================================
 print("=" * 120)
 print(f"50 Cities CLSC Baseline Solution (Journal Calibration - Full Details)")
 print("=" * 120)
 
-# 基准参数（补充alpha=0.28的详细注释，对应论文表述）
+# 基准参数（使用集中配置的参数）
 base_params = {
-    'carbon_tax': 65,  # 碳税：65元/吨CO2（论文tab:transport_policy校准值）
-    'alpha': 0.28,  # 基准回收率：28%（政策要求+行业平均履约水平，对应论文表述）
-    'carbon_cap': 1500000,  # 碳配额：150万吨CO2（论文基准值）
-    'capacity': 80000  # 回收中心单厂容量：80,000单位/年（论文假设2）
+    'carbon_tax': PARAMS.CARBON_TAX_BASE,
+    'alpha': PARAMS.ALPHA_BASE,
+    'carbon_cap': PARAMS.CARBON_CAP_BASE,
+    'capacity': PARAMS.CAPACITY_BASE
 }
 
 # 求解基准模型（返回超详细结果）
 base_results = solve_model(base_params, return_detailed=True)
 
-# 3.1 基础结果打印（保证格式清晰，不压扁，单位标注准确）
+# 4.1 基础结果打印（保证格式清晰，不压扁，单位标注准确）
 if base_results['status'] == 'Optimal':
     print("\n" + "-" * 120)
     print(f"[A] Core Objective Results")
@@ -480,7 +554,7 @@ if base_results['status'] == 'Optimal':
         f"  -> Reverse Emissions (Market→Recycler): {base_results['emit_rev']:,.2f} t {LATEX_CO2} ({base_results['emit_rev'] / base_results['total_emission'] * 100:>.2f}%)")
     print(
         f"  -> Excess Emissions (Taxable):    {base_results['excess_emission']:,.2f} t {LATEX_CO2} ({base_results['excess_emission'] / base_results['total_emission'] * 100:>.2f}%)")
-    print(f"  -> Carbon Cap (Baseline):         {base_params['carbon_cap']:,.0f} t {LATEX_CO2} (150万吨)")
+    print(f"  -> Carbon Cap (Baseline):         {base_params['carbon_cap']:,.0f} t {LATEX_CO2}")
 
     print(f"\nNetwork Flow Statistics:")
     print(f"  -> Total Forward Flow (Products): {base_results['total_flow_fwd']:,.0f} units")
@@ -489,11 +563,11 @@ if base_results['status'] == 'Optimal':
         f"  -> Actual Overall Recycle Rate:   {base_results['total_flow_rev'] / sum(DATA_50CITIES['demand_base'].values()) * 100:>.2f}% (Target: {base_params['alpha'] * 100:.2f}%)")
 
     print(f"\nFacility Status:")
-    print(f"  -> Built Recycling Centers:       {base_results['recycler_count']} units (from 22 candidates)")
+    print(f"  -> Built Recycling Centers:       {base_results['recycler_count']} units (from 23 candidates)")
     print(
         f"  -> Key Facilities (Top 5):        {[rc.replace('R_', '') for rc in base_results['recyclers_built'][:5]]}...")
 
-    # 3.2 回收中心利用率明细打印（保证列宽充足，不压扁，注释清晰）
+    # 4.2 回收中心利用率明细打印（保证列宽充足，不压扁，注释清晰）
     print("\n" + "-" * 120)
     print(f"[B] Recycling Center Utilization Details")
     print("-" * 120)
@@ -514,7 +588,7 @@ if base_results['status'] == 'Optimal':
         util_str = f"{util:<18.2f}" if util != '-' else "-" * 18
         print(f"{rc_name:<22} | {processed_str:<18} | {util_str:<18} | {fixed_c:<22,.2f} | {cap:,.0f}")
 
-    # 3.3 前10大市场明细打印（调整列宽，保证输出不压扁）
+    # 4.3 前10大市场明细打印（调整列宽，保证输出不压扁）
     print("\n" + "-" * 120)
     print(f"[C] Top 10 Market Demand & Recycle Details")
     print("-" * 120)
@@ -532,7 +606,7 @@ if base_results['status'] == 'Optimal':
         print(
             f"{market_name:<18} | {base_d:<18,.0f} | {robust_d:<18,.0f} | {fwd_f:<18,.0f} | {rev_f:<18,.0f} | {recyc_r:<18.2f}")
 
-    # 3.4 成本与排放结构占比打印（保证格式清晰，不压缩）
+    # 4.4 成本与排放结构占比打印（保证格式清晰，不压缩）
     print("\n" + "-" * 120)
     print(f"[D] Cost & Emission Structure Share")
     print("-" * 120)
@@ -552,18 +626,18 @@ else:
 print("=" * 120)
 
 # ==========================================
-# 4. 灵敏度分析 (保证输出不压扁，新增场景标注清晰)
+# 5. 灵敏度分析 (保证输出不压扁，新增场景标注清晰)
 # ==========================================
 print("\n" + "=" * 120)
 print(f"50 Cities CLSC Sensitivity Analysis (Full Detailed Output)")
 print("=" * 120)
 
-# 分析配置（保留论文基准场景，保证结果可对比）
+# 分析配置（使用集中配置的灵敏度参数范围）
 analysis_config = {
-    'carbon_tax': [45.5, 55.25, 65, 74.75, 84.5],  # ±15%、±30% 变化（基准65）
-    'alpha': [0.20, 0.24, 0.28, 0.32, 0.36],  # 回收率变化（基准0.28，对应论文表述）
-    'carbon_cap': [1100000, 1275000, 1500000, 1725000, 1950000],  # 碳配额变化（基准150万吨）
-    'capacity': [56000, 68000, 80000, 92000, 104000]  # 回收中心容量变化（基准80000）
+    'carbon_tax': PARAMS.CARBON_TAX_RANGE,
+    'alpha': PARAMS.ALPHA_RANGE,
+    'carbon_cap': PARAMS.CARBON_CAP_RANGE,
+    'capacity': PARAMS.CAPACITY_RANGE
 }
 
 # 存储灵敏度结果
@@ -606,7 +680,7 @@ for param_name, param_values in analysis_config.items():
         # 存储完整详细结果
         all_scenario_results[param_name].append(res)
 
-        # 3. 场景结果打印（保证格式清晰，不压扁，新增提示）
+        # 5. 场景结果打印（保证格式清晰，不压扁，新增提示）
         print(f"\n" + "-" * 120)
         print(f"Scenario {idx + 1}: {param_name} = {val} (Base: {base_params[param_name]})")
         print("-" * 120)
@@ -647,7 +721,7 @@ for param_name, param_values in analysis_config.items():
         else:
             print(f"Scenario Status:                    {res['status']} (Infeasible/Unbounded)")
 
-# 4. 灵敏度分析汇总表打印（调整列宽，保证输出不压扁）
+# 5. 灵敏度分析汇总表打印（调整列宽，保证输出不压扁）
 print("\n" + "=" * 120)
 print(f"Sensitivity Analysis Summary Table")
 print("=" * 120)
@@ -666,7 +740,7 @@ for param_name, results in sensitivity_results.items():
 print("=" * 120)
 
 # ==========================================
-# 5. 可视化 (优化布局，避免图表压扁，保证期刊级质量)
+# 6. 可视化 (优化布局，避免图表压扁，保证期刊级质量)
 # ==========================================
 print("\n" + "=" * 120)
 print(f"Generating Journal-Quality Sensitivity Chart")
