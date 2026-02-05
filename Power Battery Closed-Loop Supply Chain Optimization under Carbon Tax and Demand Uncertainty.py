@@ -7,7 +7,9 @@ import pandas as pd
 import numpy as np
 
 # ==========================================
-# 【核心修改：移除兰州所有相关配置】
+# 【核心修改：统一城市英文拼写（国际通用格式）】
+# 乌鲁木齐：Wulumuqi → Urumqi
+# 西安：XiAn/Xi'an → Xi'an（带撇号的国际通用拼写）
 # ==========================================
 # ---------------------- 1. 绘图样式固定参数（论文图表格式） ----------------------
 PLOT_CONFIG = {
@@ -25,7 +27,7 @@ PLOT_CONFIG = {
         'factory_edge': '#3C5488',
         'recycler_fill': '#00A087',
         'recycler_halo': '#00A087',
-        'nw_recycler_halo': '#FFA500',
+        'nw_recycler_halo': '#FFA500',  # 黄色（西北1200km圈）
         'market_fill': '#4DBBD5',
         'fwd_line': '#E64B35',
         'rev_line': '#00A087',
@@ -33,12 +35,12 @@ PLOT_CONFIG = {
     }
 }
 
-# ---------------------- 2. 区域约束参数（移除兰州，仅保留西安、乌鲁木齐） ----------------------
+# ---------------------- 2. 区域约束参数（统一拼写） ----------------------
 REGION_CONFIG = {
-    'nw_cities': ["Wulumuqi", "XiAn"],  # 核心修改：删除Lanzhou
+    'nw_cities': ["Urumqi", "Xi'an"],  # 核心修改：Wulumuqi→Urumqi，XiAn→Xi'an
     'max_rev_dist': 600,  # 常规区域逆向物流最大半径（km）
     'max_rev_dist_nw': 1200,  # 西北区域逆向物流最大半径（km）
-    'nw_radius_visual': 12.0,  # 西北辐射范围视觉尺寸（绘图用）
+    'nw_radius_visual': 9.0,  # 西北圈视觉尺寸
     'normal_radius_visual': 6.0,  # 常规区域辐射范围视觉尺寸（绘图用）
     'earth_radius': 6371  # 地球平均半径（km，Haversine公式用）
 }
@@ -57,8 +59,8 @@ PAPER_PARAMS = {
     'cost_unit_convert': 10000  # 万元 → 元 转换系数
 }
 
-# ---------------------- 4. 节点基础数据参数（删除兰州所有相关配置） ----------------------
-# 4.1 城市需求基数（核心修改：删除Lanzhou）
+# ---------------------- 4. 节点基础数据参数（统一拼写） ----------------------
+# 4.1 城市需求基数（无修改，已为Urumqi/Xi'an）
 CITY_DEMAND = {
     "Chengdu": 39500, "Hangzhou": 39200, "Shenzhen": 38400, "Shanghai": 37900,
     "Beijing": 37100, "Guangzhou": 35300, "Zhengzhou": 30300, "Chongqing": 28900,
@@ -72,10 +74,10 @@ CITY_DEMAND = {
     "Nanchang": 9700, "Changzhou": 9600, "Guiyang": 9300, "Luoyang": 9200,
     "Tangshan": 8700, "Nantong": 8700, "Harbin": 8600, "Handan": 8500,
     "Weifang": 8500, "Urumqi": 8200, "Quanzhou": 8200, "Fuzhou": 8100,
-    "Zhongshan": 7800, "Jiaxing": 7800  # 核心修改：删除Lanzhou: 8000
+    "Zhongshan": 7800, "Jiaxing": 7800
 }
 
-# 4.2 城市经纬度（核心修改：删除兰州坐标）
+# 4.2 城市经纬度（无修改，已为Urumqi/Xi'an）
 CITY_COORDS = {
     "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
     "Shanghai": (31.23, 121.47), "Beijing": (39.90, 116.40), "Guangzhou": (23.13, 113.26),
@@ -93,10 +95,10 @@ CITY_COORDS = {
     "Luoyang": (34.62, 112.45), "Tangshan": (39.63, 118.18), "Nantong": (32.01, 120.86),
     "Harbin": (45.80, 126.53), "Handan": (36.61, 114.49), "Weifang": (36.71, 119.16),
     "Urumqi": (43.83, 87.62), "Quanzhou": (24.87, 118.68), "Fuzhou": (26.08, 119.30),
-    "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)  # 核心修改：删除Lanzhou坐标
+    "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
 }
 
-# 4.3 回收中心配置（核心修改：删除兰州回收中心）
+# 4.3 回收中心配置（无修改，已为Urumqi/Xi'an）
 RECYCLER_CONFIG = [
     ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
     ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
@@ -108,18 +110,18 @@ RECYCLER_CONFIG = [
     ("Qingdao", (36.07, 120.38), 5400), ("Harbin", (45.80, 126.53), 4600),
     ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
     ("Kunming", (25.04, 102.71), 4900), ("Urumqi", (43.83, 87.62), 4700),
-    ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)  # 核心修改：删除兰州回收中心配置
+    ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
 ]
 
-# 4.4 工厂配置（完全不变）
+# 4.4 工厂配置（核心修改：XiAn → Xi'an，统一拼写）
 FACTORY_CONFIG = [
-    ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
+    ("Xi'an", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
     ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
     ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
 ]
 
 # ==========================================
-# 【后续代码：完全不变，仅调用修改后的前置配置】
+# 【后续代码：逻辑完全不变，仅依赖统一后的拼写】
 # ==========================================
 # ---------------------- 第一步：全局配置初始化 ----------------------
 plt.rcParams.update({
@@ -134,13 +136,11 @@ plt.rcParams.update({
     'savefig.dpi': PLOT_CONFIG['savefig_dpi'],
 })
 
-
 # ---------------------- 第二步：辅助函数 ----------------------
 def is_nw_city(city_name):
-    """判断是否为西北城市（仅匹配西安、乌鲁木齐）"""
+    """判断是否为西北城市（匹配统一后的Urumqi、Xi'an）"""
     city = city_name.replace("M_", "").replace("R_", "").replace("F_", "")
     return city in REGION_CONFIG['nw_cities']
-
 
 def haversine_dist(n1, n2, locations):
     """Haversine公式计算实际距离（km）"""
@@ -160,7 +160,6 @@ def haversine_dist(n1, n2, locations):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return REGION_CONFIG['earth_radius'] * c
 
-
 def add_smart_label(pos, text, color, size=9, weight='bold', dy=0):
     """绘图标签辅助函数"""
     txt = plt.text(pos[1], pos[0] + dy, text,
@@ -168,9 +167,8 @@ def add_smart_label(pos, text, color, size=9, weight='bold', dy=0):
                    ha='center', va='center', zorder=50)
     txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground='white', alpha=0.9)])
 
-
 # ---------------------- 第三步：数据构建 ----------------------
-# 构建位置字典
+# 构建位置字典（自动使用统一后的城市名）
 locations = {}
 for c, pos in FACTORY_CONFIG: locations[f"F_{c}"] = pos
 for c in CITY_DEMAND.keys(): locations[f"M_{c}"] = CITY_COORDS[c]
@@ -219,7 +217,7 @@ for j in markets:
     prob += pulp.lpSum([x[i][j] for i in factories]) >= demand_base[j] + GAMMA * demand_uncertainty[j]
     prob += pulp.lpSum([z[j][k] for k in candidates]) >= demand_base[j] * ALPHA
 
-    # 区域距离约束
+    # 区域距离约束（现在判定逻辑完全一致）
     for k in candidates:
         dist = get_dist(j, k)
         if is_nw_city(j) or is_nw_city(k):
@@ -232,7 +230,7 @@ for j in markets:
 for k in candidates:
     prob += pulp.lpSum([z[j][k] for j in markets]) <= CAPACITY * y[k]
 
-# 西北回收中心优先约束
+# 西北回收中心优先约束（拼写统一后，判定更精准）
 nw_recyclers = [k for k in candidates if is_nw_city(k)]
 if nw_recyclers:
     prob += pulp.lpSum([y[k] for k in nw_recyclers]) >= 1, "NW_Recycler_Min_Constraint"
@@ -263,10 +261,8 @@ if pulp.LpStatus[prob.status] == 'Optimal':
     print(f"[B] EMISSION & CARBON FOOTPRINT")
     print(f" - Total Carbon Emissions : {pulp.value(emit_fwd + emit_rev):,.2f} tCO2")
     total_emission = pulp.value(emit_fwd + emit_rev)
-    print(
-        f" - Forward Emission Cont. : {pulp.value(emit_fwd):,.2f} tCO2 ({pulp.value(emit_fwd) / total_emission * 100:>.2f}%)")
-    print(
-        f" - Reverse Emission Cont. : {pulp.value(emit_rev):,.2f} tCO2 ({pulp.value(emit_rev) / total_emission * 100:>.2f}%)")
+    print(f" - Forward Emission Cont. : {pulp.value(emit_fwd):,.2f} tCO2 ({pulp.value(emit_fwd) / total_emission * 100:>.2f}%)")
+    print(f" - Reverse Emission Cont. : {pulp.value(emit_rev):,.2f} tCO2 ({pulp.value(emit_rev) / total_emission * 100:>.2f}%)")
     used_quota = min(total_emission, CARBON_CAP)
     print(f" - Carbon Quota Used      : {used_quota:,.2f} tCO2 / {CARBON_CAP:,.2f} tCO2")
     print("-" * 90)
@@ -279,12 +275,11 @@ if pulp.LpStatus[prob.status] == 'Optimal':
 
     print(f"[D] HUB OPERATIONAL STATUS")
     if built_nw_k:
-        print(f" - Northwest Recyclers Built: {[k.replace('R_', '') for k in built_nw_k]}")
+        print(f" - Northwest Recyclers Built: {[k.replace('R_', '') for k in built_nw_k]}")  # 输出统一后的名称
     print(f"{'Recycling Center':<20} | {'Processed Qty':<15} | {'Utilization (%)':<15} | {'Fixed Cost (10^4 CNY)'}")
     for k in built_k:
         load = sum(pulp.value(z[j][k]) for j in markets)
-        print(
-            f"{k.replace('R_', ''):<20} | {load:<15,.0f} | {load / CAPACITY * 100:<15.2f} | {fixed_cost[k] / 10000:<,.0f}")
+        print(f"{k.replace('R_', ''):<20} | {load:<15,.0f} | {load / CAPACITY * 100:<15.2f} | {fixed_cost[k] / 10000:<,.0f}")
     print("=" * 90)
 
 # ---------------------- 第六步：绘图 ----------------------
@@ -355,14 +350,15 @@ for k in built_k:
     pos = locations[k]
     city_name = k.replace('R_', '')
     if is_nw_city(k):
-        # 西北回收中心
+        # 西北回收中心（1200km黄色圈）
         circle = plt.Circle((pos[1], pos[0]), REGION_CONFIG['nw_radius_visual'],
-                            color=STYLE_COLORS['nw_recycler_halo'], alpha=0.15, zorder=1, linewidth=0)
+                            color=STYLE_COLORS['nw_recycler_halo'], alpha=0.3,
+                            zorder=1, linewidth=0)
         circle_edge = plt.Circle((pos[1], pos[0]), REGION_CONFIG['nw_radius_visual'],
                                  fill=False, edgecolor=STYLE_COLORS['nw_recycler_halo'],
-                                 linestyle='--', linewidth=0.8, alpha=0.6, zorder=1)
+                                 linestyle='--', linewidth=1.2, alpha=0.8, zorder=1)
     else:
-        # 常规回收中心
+        # 常规回收中心（600km绿色圈）
         circle = plt.Circle((pos[1], pos[0]), REGION_CONFIG['normal_radius_visual'],
                             color=STYLE_COLORS['recycler_halo'], alpha=0.15, zorder=1, linewidth=0)
         circle_edge = plt.Circle((pos[1], pos[0]), REGION_CONFIG['normal_radius_visual'],
@@ -422,5 +418,5 @@ ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
-plt.savefig("50cities_optimized_vis_nw_adapted.png", bbox_inches='tight', dpi=PLOT_CONFIG['savefig_dpi'])
+plt.savefig("50cities_optimized_vis_nw_unified.png", bbox_inches='tight', dpi=PLOT_CONFIG['savefig_dpi'])
 plt.show()
