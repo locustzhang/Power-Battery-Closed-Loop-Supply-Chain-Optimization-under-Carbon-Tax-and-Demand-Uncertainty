@@ -55,8 +55,8 @@ class ModelParameters:
     # 回收中心容量灵敏度：±15%、±30%变化
     CAPACITY_RANGE = [56000, 68000, 80000, 92000, 104000]
 
-    # ============ 西北区域配置（新增：标记西北城市，适配单独回收需求） ============
-    NW_CITIES = ["Wulumuqi", "XiAn", "Lanzhou"]  # 西北核心城市（保留乌鲁木齐）
+    # ============ 西北区域配置（修正：仅保留乌鲁木齐、西安，匹配数学模型） ============
+    NW_CITIES = ["Wulumuqi", "XiAn"]  # 西北核心城市（仅乌鲁木齐、西安，无兰州）
 
 
 # 实例化参数对象（全局可访问）
@@ -122,14 +122,14 @@ CARBON_CAP_FACTOR = 1e4  # 碳容量转换为 10^4 tons CO2，便于绘图展示
 
 
 # ==========================================
-# 2. 数据准备 (50城市全量数据，优化：西北区域适配+补充兰州坐标)
+# 2. 数据准备 (50城市全量数据，移除兰州+匹配原始数据/数学模型)
 # ==========================================
 def prepare_50cities_data():
     """准备50城市CLSC模型全量数据，返回结构化结果，对齐数学模型参数"""
     # 使用集中配置的参数
     TOTAL_UNITS_NATIONAL = PARAMS.TOTAL_RETIRED_BATTERY / PARAMS.UNIT_BATTERY_WEIGHT
 
-    # 50城市销量权重 (完整保留，新增兰州权重适配西北回收)
+    # 50城市销量权重 (原始数据完整保留，移除兰州，共50个)
     city_sales_weight = [
         ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
         ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
@@ -143,10 +143,10 @@ def prepare_50cities_data():
         ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
         ("Tangshan", 0.219), ("Nantong", 0.218), ("Harbin", 0.216), ("Handan", 0.215),
         ("Weifang", 0.213), ("Urumqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
-        ("Zhongshan", 0.198), ("Jiaxing", 0.197), ("Lanzhou", 0.200)  # 新增：兰州销量权重，适配西北回收
+        ("Zhongshan", 0.198), ("Jiaxing", 0.197)
     ]
 
-    # 50城市坐标 (核心优化：补充兰州坐标+保留乌鲁木齐，适配西北区域)
+    # 50城市坐标 (核心修正：移除兰州，保留乌鲁木齐/西安，共50个)
     city_coords = {
         "Chengdu": (30.67, 104.06),
         "Hangzhou": (30.27, 120.15),
@@ -193,16 +193,14 @@ def prepare_50cities_data():
         "Harbin": (45.80, 126.53),
         "Handan": (36.61, 114.49),
         "Weifang": (36.71, 119.16),
-        "Urumqi": (43.83, 87.62),  # 保留：乌鲁木齐坐标，西北核心回收点
+        "Urumqi": (43.83, 87.62),  # 西北核心：乌鲁木齐
         "Quanzhou": (24.87, 118.68),
         "Fuzhou": (26.08, 119.30),
         "Zhongshan": (22.52, 113.39),
-        "Jiaxing": (30.75, 120.75),
-        "Lanzhou": (36.06, 103.82)  # 新增：兰州坐标，西北辅助回收点（适配乌鲁木齐转运）
+        "Jiaxing": (30.75, 120.75)
     }
 
-    # 22个回收中心候选 (优化：保留乌鲁木齐+新增兰州，固定成本贴合行业实际)
-    # 固定成本：直接采用论文表tab:fixed_cost_calibration校准值（万元），无额外放大
+    # 22个回收中心候选 (移除兰州，共22个，匹配数学模型|R|=22，固定成本贴合行业实际)
     recycler_config = [
         ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
         ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
@@ -213,12 +211,11 @@ def prepare_50cities_data():
         ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),
         ("Qingdao", (36.07, 120.38), 5400), ("Harbin", (45.80, 126.53), 4600),
         ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
-        ("Kunming", (25.04, 102.71), 4900), ("Urumqi", (43.83, 87.62), 4700),  # 保留：乌鲁木齐，西北核心
-        ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900),
-        ("Lanzhou", (36.06, 103.82), 5200)  # 新增：兰州，西北辅助转运点（固定成本5200万元，贴合行业）
+        ("Kunming", (25.04, 102.71), 4900), ("Urumqi", (43.83, 87.62), 4700),  # 西北核心：乌鲁木齐
+        ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
     ]
 
-    # 6个工厂配置 (完整保留，对齐数学模型)
+    # 6个工厂配置 (完整保留，对齐数学模型|F|=6：西安、长沙、深圳、上海、成都、北京)
     factory_config = [
         ("Xi'an", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
         ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
@@ -279,7 +276,7 @@ def get_dist(n1, n2):
 
 
 def is_nw_city(city_name):
-    """判断是否为西北城市，适配单独距离约束"""
+    """判断是否为西北城市，适配单独距离约束（仅乌鲁木齐、西安）"""
     city = city_name.replace("M_", "").replace("R_", "")
     return city in PARAMS.NW_CITIES
 
@@ -320,7 +317,7 @@ def solve_model(params, return_detailed=True):
     for j in markets:
         for k in candidates:
             dist = get_dist(j, k)
-            # 西北城市放宽距离约束，常规城市严格600km
+            # 西北城市（乌鲁木齐/西安）放宽距离约束至1200km，常规城市严格600km
             if is_nw_city(j) or is_nw_city(k):
                 if dist <= max_rev_dist_nw:
                     valid_reverse_pairs.append((j, k))
@@ -379,7 +376,7 @@ def solve_model(params, return_detailed=True):
     for k in candidates:
         prob += pulp.lpSum([z_vars[j][k] for j in markets]) <= capacity * y_vars[k], f"Capacity_Constraint_{k}"
 
-    # 新增：西北区域回收中心优先约束（保证乌鲁木齐/兰州被合理选中，提升利用率）
+    # 西北区域回收中心优先约束（匹配数学模型：至少建设一个西北回收中心（乌鲁木齐/西安））
     nw_recyclers = [k for k in candidates if is_nw_city(k)]
     if nw_recyclers:
         prob += pulp.lpSum([y_vars[k] for k in nw_recyclers]) >= 1, "NW_Recycler_Min_Constraint"
@@ -563,7 +560,7 @@ if base_results['status'] == 'Optimal':
         f"  -> Actual Overall Recycle Rate:   {base_results['total_flow_rev'] / sum(DATA_50CITIES['demand_base'].values()) * 100:>.2f}% (Target: {base_params['alpha'] * 100:.2f}%)")
 
     print(f"\nFacility Status:")
-    print(f"  -> Built Recycling Centers:       {base_results['recycler_count']} units (from 23 candidates)")
+    print(f"  -> Built Recycling Centers:       {base_results['recycler_count']} units (from 22 candidates)")
     print(
         f"  -> Key Facilities (Top 5):        {[rc.replace('R_', '') for rc in base_results['recyclers_built'][:5]]}...")
 
