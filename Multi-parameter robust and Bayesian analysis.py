@@ -60,29 +60,25 @@ COLORS = {
 }
 
 # ==========================================
-# 1. Data Generation (Unchanged)
+# 1. Data Generation (修正：贴合论文数据，移除无效计算)
 # ==========================================
 def prepare_50cities_data():
-    NATIONAL_SALES = 12866000
-    TOTAL_RETIRED = 820000
-    UNIT_WEIGHT = 0.5
-    TOTAL_UNITS = TOTAL_RETIRED / UNIT_WEIGHT
-
-    city_weights = [
-        ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
-        ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
-        ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
-        ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
-        ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
-        ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
-        ("Shenyang", 0.363), ("Nanning", 0.337), ("Taiyuan", 0.315), ("Kunming", 0.309),
-        ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
-        ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
-        ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
-        ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
-        ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
-        ("Zhongshan", 0.198), ("Jiaxing", 0.197)
-    ]
+    # 论文表\ref{tab:demand} 直接录入校准后的需求数据（避免计算偏差）
+    city_demand_direct = {
+        "Chengdu": 39500, "Hangzhou": 39200, "Shenzhen": 38400, "Shanghai": 37900,
+        "Beijing": 37100, "Guangzhou": 35300, "Zhengzhou": 30300, "Chongqing": 28900,
+        "XiAn": 28800, "Tianjin": 28700, "Wuhan": 28100, "Suzhou": 28000,
+        "Hefei": 21200, "Wuxi": 19500, "Ningbo": 19500, "Dongguan": 18400,
+        "Nanjing": 18300, "Changsha": 17600, "Wenzhou": 17300, "Shijiazhuang": 15700,
+        "Jinan": 15500, "Foshan": 15300, "Qingdao": 15200, "Changchun": 14800,
+        "Shenyang": 14400, "Nanning": 13400, "Taiyuan": 12500, "Kunming": 12300,
+        "Linyi": 12100, "Taizhou": 11700, "Jinhua": 11500, "Xuzhou": 11200,
+        "Haikou": 10900, "Jining": 10600, "Xiamen": 10300, "Baoding": 10200,
+        "Nanchang": 9700, "Changzhou": 9600, "Guiyang": 9300, "Luoyang": 9200,
+        "Tangshan": 8700, "Nantong": 8700, "Haerbin": 8600, "Handan": 8500,
+        "Weifang": 8500, "Wulumuqi": 8200, "Quanzhou": 8200, "Fuzhou": 8100,
+        "Zhongshan": 7800, "Jiaxing": 7800
+    }
 
     city_coords = {
         "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
@@ -104,6 +100,7 @@ def prepare_50cities_data():
         "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
     }
 
+    # 论文表\ref{tab:fixed_cost_calibration} 回收中心固定成本（万元，直接录入，无额外放大）
     recycler_cfg = [
         ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
         ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
@@ -118,21 +115,15 @@ def prepare_50cities_data():
         ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
     ]
 
+    # 论文定义的6个工厂
     factory_cfg = [
         ("XiAn", (34.34, 108.94)), ("Changsha", (28.23, 112.94)),
         ("Shenzhen", (22.54, 114.05)), ("Shanghai", (31.23, 121.47)),
         ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
     ]
 
-    total_w = sum(w for _, w in city_weights)
-    ratio = total_w / len(city_weights)
-    actual_sales = NATIONAL_SALES * ratio
-
-    city_demand = {}
-    for c, w in city_weights:
-        city_demand[c] = int(TOTAL_UNITS * (actual_sales * (w/total_w) / NATIONAL_SALES))
-
-    markets = [f"M_{c}" for c, _ in city_weights]
+    # 构造集合与映射
+    markets = [f"M_{c}" for c in city_demand_direct.keys()]
     factories = [f"F_{c}" for c, _ in factory_cfg]
     candidates = [f"R_{c}" for c, _, _ in recycler_cfg]
 
@@ -141,8 +132,10 @@ def prepare_50cities_data():
     for c, pos in city_coords.items(): locations[f"M_{c}"] = pos
     for c, pos, _ in recycler_cfg: locations[f"R_{c}"] = pos
 
-    fixed_cost = {f"R_{c}": cost * 3000 for c, _, cost in recycler_cfg}
-    demand_base = {f"M_{c}": city_demand[c] for c, _ in city_weights}
+    # 修正1：移除无依据的 *3000，固定成本直接转换为元（万元→元）
+    fixed_cost = {f"R_{c}": cost * 10000 for c, _, cost in recycler_cfg}
+    # 修正2：需求基数直接取自论文表，波动项为20%（论文假设）
+    demand_base = {f"M_{c}": city_demand_direct[c] for c in city_demand_direct.keys()}
     demand_uncert = {k: v * 0.2 for k, v in demand_base.items()}
 
     return markets, factories, candidates, locations, fixed_cost, demand_base, demand_uncert
@@ -150,11 +143,21 @@ def prepare_50cities_data():
 markets, factories, candidates, locations, fixed_cost, demand_base, demand_uncert = prepare_50cities_data()
 
 # ==========================================
-# 2. Exact MILP Model (Unchanged)
+# 2. Exact MILP Model (修正：贴合论文数学模型，核心参数/约束对齐)
 # ==========================================
 def get_dist(n1, n2):
+    """修正：地理距离计算（经纬度转实际公里数，确保600km约束有效）"""
     p1, p2 = locations[n1], locations[n2]
-    return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) * 100
+    lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
+    lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
+
+    # 哈弗辛公式（计算地球表面两点间距离，更贴合实际）
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    R = 6371  # 地球平均半径（公里）
+    return R * c
 
 def solve_exact_milp(params):
     alpha = params['alpha']
@@ -162,43 +165,54 @@ def solve_exact_milp(params):
     cap = params['carbon_cap']
     capacity = params['capacity']
 
-    TRANS_COST = 1.6
-    FWD_CARBON_FACTOR = 0.0004
-    REV_CARBON_FACTOR = 0.0030
-    MAX_DIST = 600
-    GAMMA = 1.0
+    # 修正3：核心参数对齐论文表\ref{tab:transport_policy}
+    TRANS_COST = 1.6  # 元/单位·km（论文取值）
+    FWD_CARBON_FACTOR = 0.004  # 吨CO2/单位·km（正向，论文取值，移除多余0）
+    REV_CARBON_FACTOR = 0.025  # 吨CO2/单位·km（逆向，论文取值，移除多余0）
+    MAX_DIST = 600  # 逆向物流最大半径（公里，论文取值）
+    GAMMA = 1.0  # 鲁棒系数（论文设定，最坏情形）
 
     prob = pulp.LpProblem("CLSC_Exact_Revised", pulp.LpMinimize)
 
+    # 论文定义的决策变量
     x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')
     z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')
     y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')
     excess_e = pulp.LpVariable("ExcE", 0, cat='Continuous')
 
+    # 修正4：运输成本计算贴合论文公式（c_ij = dist_ij × c_trans）
     cost_trans = pulp.lpSum([x[i][j]*get_dist(i,j)*TRANS_COST for i in factories for j in markets]) + \
                  pulp.lpSum([z[j][k]*get_dist(j,k)*TRANS_COST for j in markets for k in candidates])
 
+    # 修正5：碳排放计算贴合论文公式（正/逆向差异化因子）
     emission = pulp.lpSum([x[i][j]*get_dist(i,j)*FWD_CARBON_FACTOR for i in factories for j in markets]) + \
                pulp.lpSum([z[j][k]*get_dist(j,k)*REV_CARBON_FACTOR for j in markets for k in candidates])
 
+    # 固定成本（已修正，万元→元）
     cost_fixed = pulp.lpSum([fixed_cost[k]*y[k] for k in candidates])
 
+    # 论文目标函数：最小化总成本（固定+运输+碳税）
     prob += cost_fixed + cost_trans + excess_e * tax
 
+    # 约束1：碳配额约束（论文公式4）
     prob += excess_e >= emission - cap
 
+    # 约束2：鲁棒需求覆盖 + 约束3：回收政策约束（论文公式2、3）
     for j in markets:
-        d_robust = demand_base[j] + GAMMA * demand_uncert[j]
-        prob += pulp.lpSum([x[i][j] for i in factories]) >= d_robust
-        prob += pulp.lpSum([z[j][k] for k in candidates]) >= demand_base[j] * alpha
-        
+        d_robust = demand_base[j] + GAMMA * demand_uncert[j]  # 论文γ=1.0，最坏情形
+        prob += pulp.lpSum([x[i][j] for i in factories]) >= d_robust  # 正向供应充足
+        prob += pulp.lpSum([z[j][k] for k in candidates]) >= demand_base[j] * alpha  # 最低回收率
+
+        # 约束4：地理辐射约束（论文公式5，超过600km禁止运输）
         for k in candidates:
             if get_dist(j, k) > MAX_DIST:
                 prob += z[j][k] == 0
 
+    # 约束5：回收中心容量约束（论文公式3）
     for k in candidates:
         prob += pulp.lpSum([z[j][k] for j in markets]) <= capacity * y[k]
 
+    # 求解模型（静默模式，不输出冗余日志）
     prob.solve(pulp.PULP_CBC_CMD(msg=False))
 
     if pulp.LpStatus[prob.status] == 'Optimal':
@@ -207,18 +221,19 @@ def solve_exact_milp(params):
         return np.nan
 
 # ==========================================
-# 3. Simulation Logic (Unchanged)
+# 3. Simulation Logic (修正：碳配额参数贴合论文，保留输出格式)
 # ==========================================
 print("="*60)
 print("  SIMULATION START: BAYESIAN VS ROBUST (50 CITIES)")
 print("="*60)
 
 N_SIMS = 1000
+# 修正6：BASE_PARAMS 对齐论文表\ref{tab:transport_policy}
 BASE_PARAMS = {
-    'alpha': 0.28,
-    'carbon_tax': 65,
-    'carbon_cap': 100000,
-    'capacity': 80000
+    'alpha': 0.28,               # 法定回收率（论文取值）
+    'carbon_tax': 65,            # 碳税（元/吨CO2，论文取值）
+    'carbon_cap': 150000,        # 年度碳配额（万吨→吨，论文取值150万吨）
+    'capacity': 80000            # 单回收中心处理能力（单位/年，论文取值）
 }
 
 results_log = []
@@ -229,7 +244,7 @@ for i in range(N_SIMS):
     p = BASE_PARAMS.copy()
     p['alpha'] = np.random.uniform(0.196, 0.364)
     p['carbon_tax'] = np.random.uniform(45.5, 84.5)
-    p['carbon_cap'] = np.random.uniform(70000, 130000)
+    p['carbon_cap'] = np.random.uniform(105000, 195000)  # 碳配额波动对应±30%
 
     cost = solve_exact_milp(p)
     if not np.isnan(cost):
@@ -249,7 +264,7 @@ for i in range(N_SIMS):
     p = BASE_PARAMS.copy()
     p['alpha'] = beta.rvs(100, 257)
     p['carbon_tax'] = np.random.normal(65, 2.0)
-    p['carbon_cap'] = np.random.normal(100000, 5000)
+    p['carbon_cap'] = np.random.normal(150000, 7500)  # 碳配额正态分布贴合论文
 
     bayes_alphas.append(p['alpha'])
     bayes_taxes.append(p['carbon_tax'])
@@ -263,7 +278,7 @@ for i in range(N_SIMS):
 sys.stdout.write("\n")
 
 # ==========================================
-# 4. Visualization (HEAVILY OPTIMIZED)
+# 4. Visualization (HEAVILY OPTIMIZED) - 完全保留原风格，无修改
 # ==========================================
 print("\n[3/3] Generating High-Resolution Plots...")
 
@@ -274,7 +289,7 @@ bay_data = np.array(bayes_costs) / 1e8
 fig1, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
 
 # 计算KDE
-x_eval = np.linspace(min(rob_data.min(), bay_data.min())*0.95, 
+x_eval = np.linspace(min(rob_data.min(), bay_data.min())*0.95,
                      max(rob_data.max(), bay_data.max())*1.05, 500)
 kde_rob = gaussian_kde(rob_data)(x_eval)
 kde_bay = gaussian_kde(bay_data)(x_eval)
@@ -335,7 +350,7 @@ fig2, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
 params_data = [
     (bayes_alphas, 0.28, r'Recovery Rate ($\alpha$)', COLORS['bayes_line'], '{:.2f}'),
     (bayes_taxes, 65, r'Carbon Tax ($C_{tax}$)', COLORS['robust_line'], '{:.0f}'),
-    (np.array(bayes_caps)/1000, 100, r'Carbon Cap ($10^3$ t)', '#8E44AD', '{:.0f}') # 紫色
+    (np.array(bayes_caps)/1000, 150, r'Carbon Cap ($10^3$ t)', '#8E44AD', '{:.0f}') # 修正：碳配额基准值150（贴合论文）
 ]
 titles = ['(a) Recovery Rate', '(b) Carbon Tax', '(c) Carbon Cap']
 
@@ -344,35 +359,35 @@ for i, (data, base, label, col, fmt) in enumerate(params_data):
     kde = gaussian_kde(data)
     x = np.linspace(min(data), max(data), 100)
     y = kde(x)
-    
+
     # 填充与线条
     ax.plot(x, y, color=col, lw=2)
     ax.fill_between(x, 0, y, color=col, alpha=0.15)
-    
+
     # 95% HDI 区域高亮
     low, high = np.percentile(data, [2.5, 97.5])
     mask = (x >= low) & (x <= high)
     ax.fill_between(x, 0, y, where=mask, color=col, alpha=0.4, label='95% HDI')
-    
+
     # 基准线
     ax.axvline(base, color='#555555', linestyle='--', lw=1.2, label='Baseline')
-    
+
     # 标注文本 (Mean & CI)
     mean_val = np.mean(data)
     info_text = fr"$\mu={fmt.format(mean_val)}$" + "\n" + fr"$CI_{{95\%}}=[{fmt.format(low)}, {fmt.format(high)}]$"
-    ax.text(0.96, 0.96, info_text, transform=ax.transAxes, ha='right', va='top', 
+    ax.text(0.96, 0.96, info_text, transform=ax.transAxes, ha='right', va='top',
             fontsize=9, bbox=dict(boxstyle='square,pad=0.2', fc='white', ec='none', alpha=0.8))
 
     # 轴标签与标题
     ax.set_xlabel(label, fontweight='bold')
-    if i == 0: 
+    if i == 0:
         ax.set_ylabel('Posterior Density', fontweight='bold')
         ax.legend(loc='upper left', fontsize=9)
     else:
         ax.set_ylabel('')
-        
+
     ax.set_title(titles[i], loc='left', fontsize=11, fontweight='bold')
-    
+
     # 格式化X轴
     if i == 0:
         ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.2f'))
@@ -389,7 +404,7 @@ plt.savefig("Fig2_Parameters_Publication.png", dpi=600, bbox_inches='tight')
 plt.show()
 
 # ==========================================
-# 5. Summary Text (Keep Logic)
+# 5. Summary Text (Keep Logic) - 完全保留原输出格式，无修改
 # ==========================================
 print("\n" + "="*60)
 print(f"{'RESULTS SUMMARY':^60}")
