@@ -62,32 +62,29 @@ COLORS = {
 }
 
 # ==========================================
-# 1. Data Preparation (Unchanged)
+# 1. Data Preparation (Aligned with Paper Data & Model)
 # ==========================================
 print("="*70)
 print("  50 CITIES CLSC NETWORK: BAYESIAN INFERENCE (EXACT MILP)")
 print("="*70)
 
-NATIONAL_SALES_TOTAL = 12866000
-TOTAL_RETIRED_BATTERY = 820000
-UNIT_BATTERY_WEIGHT = 0.5
-TOTAL_UNITS_NATIONAL = TOTAL_RETIRED_BATTERY / UNIT_BATTERY_WEIGHT
-
-city_sales_weight = [
-    ("Chengdu", 1.000), ("Hangzhou", 0.993), ("Shenzhen", 0.971), ("Shanghai", 0.960),
-    ("Beijing", 0.939), ("Guangzhou", 0.894), ("Zhengzhou", 0.767), ("Chongqing", 0.733),
-    ("XiAn", 0.729), ("Tianjin", 0.727), ("Wuhan", 0.711), ("Suzhou", 0.708),
-    ("Hefei", 0.538), ("Wuxi", 0.494), ("Ningbo", 0.493), ("Dongguan", 0.467),
-    ("Nanjing", 0.464), ("Changsha", 0.447), ("Wenzhou", 0.439), ("Shijiazhuang", 0.398),
-    ("Jinan", 0.393), ("Foshan", 0.387), ("Qingdao", 0.383), ("Changchun", 0.374),
-    ("Shenyang", 0.363), ("Nanning", 0.337), ("Taiyuan", 0.315), ("Kunming", 0.309),
-    ("Linyi", 0.305), ("Taizhou", 0.295), ("Jinhua", 0.291), ("Xuzhou", 0.284),
-    ("Haikou", 0.276), ("Jining", 0.267), ("Xiamen", 0.260), ("Baoding", 0.258),
-    ("Nanchang", 0.245), ("Changzhou", 0.242), ("Guiyang", 0.233), ("Luoyang", 0.231),
-    ("Tangshan", 0.219), ("Nantong", 0.218), ("Haerbin", 0.216), ("Handan", 0.215),
-    ("Weifang", 0.213), ("Wulumuqi", 0.208), ("Quanzhou", 0.207), ("Fuzhou", 0.204),
-    ("Zhongshan", 0.198), ("Jiaxing", 0.197)
-]
+# 论文核心校准参数（直接提取，避免冗余计算）
+TOTAL_UNITS_NATIONAL = 820000 / 0.5  # 1,640,000 单位（82万吨 ÷ 0.5吨/单位）
+PAPER_CITY_DEMAND = {
+    "Chengdu": 39500, "Hangzhou": 39200, "Shenzhen": 38400, "Shanghai": 37900,
+    "Beijing": 37100, "Guangzhou": 35300, "Zhengzhou": 30300, "Chongqing": 28900,
+    "XiAn": 28800, "Tianjin": 28700, "Wuhan": 28100, "Suzhou": 28000,
+    "Hefei": 21200, "Wuxi": 19500, "Ningbo": 19500, "Dongguan": 18400,
+    "Nanjing": 18300, "Changsha": 17600, "Wenzhou": 17300, "Shijiazhuang": 15700,
+    "Jinan": 15500, "Foshan": 15300, "Qingdao": 15200, "Changchun": 14800,
+    "Shenyang": 14400, "Nanning": 13400, "Taiyuan": 12500, "Kunming": 12300,
+    "Linyi": 12100, "Taizhou": 11700, "Jinhua": 11500, "Xuzhou": 11200,
+    "Haikou": 10900, "Jining": 10600, "Xiamen": 10300, "Baoding": 10200,
+    "Nanchang": 9700, "Changzhou": 9600, "Guiyang": 9300, "Luoyang": 9200,
+    "Tangshan": 8700, "Nantong": 8700, "Haerbin": 8600, "Handan": 8500,
+    "Weifang": 8500, "Wulumuqi": 8200, "Quanzhou": 8200, "Fuzhou": 8100,
+    "Zhongshan": 7800, "Jiaxing": 7800
+}
 
 city_coords = {
     "Chengdu": (30.67, 104.06), "Hangzhou": (30.27, 120.15), "Shenzhen": (22.54, 114.05),
@@ -109,18 +106,19 @@ city_coords = {
     "Zhongshan": (22.52, 113.39), "Jiaxing": (30.75, 120.75)
 }
 
+# 回收中心配置（对齐论文表~\ref{tab:fixed_cost_calibration}，年度分摊成本：万元→元）
 recycler_config = [
-    ("Hefei", (31.82, 117.22), 5800), ("Zhengzhou", (34.76, 113.65), 5300),
-    ("Guiyang", (26.64, 106.63), 5000), ("Changsha", (28.23, 112.94), 6200),
-    ("Wuhan", (30.59, 114.30), 5800), ("Yibin", (28.77, 104.63), 7000),
-    ("Nanchang", (28.68, 115.86), 5500), ("Xian", (34.34, 108.94), 5600),
-    ("Tianjin", (39.13, 117.20), 5700), ("Nanjing", (32.05, 118.78), 5900),
-    ("Hangzhou", (30.27, 120.15), 6000), ("Changchun", (43.88, 125.32), 4800),
-    ("Nanning", (22.82, 108.32), 5200), ("Shenzhen", (22.54, 114.05), 6500),
-    ("Qingdao", (36.07, 120.38), 5400), ("Haerbin", (45.80, 126.53), 4600),
-    ("Fuzhou", (26.08, 119.30), 5100), ("Xiamen", (24.48, 118.08), 5300),
-    ("Kunming", (25.04, 102.71), 4900), ("Wulumuqi", (43.83, 87.62), 4700),
-    ("Haikou", (20.02, 110.35), 5000), ("Shenyang", (41.80, 123.43), 4900)
+    ("Hefei", (31.82, 117.22), 5800 * 10000), ("Zhengzhou", (34.76, 113.65), 5300 * 10000),
+    ("Guiyang", (26.64, 106.63), 5000 * 10000), ("Changsha", (28.23, 112.94), 6200 * 10000),
+    ("Wuhan", (30.59, 114.30), 5800 * 10000), ("Yibin", (28.77, 104.63), 7000 * 10000),
+    ("Nanchang", (28.68, 115.86), 5500 * 10000), ("XiAn", (34.34, 108.94), 5600 * 10000),
+    ("Tianjin", (39.13, 117.20), 5700 * 10000), ("Nanjing", (32.05, 118.78), 5900 * 10000),
+    ("Hangzhou", (30.27, 120.15), 6000 * 10000), ("Changchun", (43.88, 125.32), 4800 * 10000),
+    ("Nanning", (22.82, 108.32), 5200 * 10000), ("Shenzhen", (22.54, 114.05), 6500 * 10000),
+    ("Qingdao", (36.07, 120.38), 5400 * 10000), ("Haerbin", (45.80, 126.53), 4600 * 10000),
+    ("Fuzhou", (26.08, 119.30), 5100 * 10000), ("Xiamen", (24.48, 118.08), 5300 * 10000),
+    ("Kunming", (25.04, 102.71), 4900 * 10000), ("Wulumuqi", (43.83, 87.62), 4700 * 10000),
+    ("Haikou", (20.02, 110.35), 5000 * 10000), ("Shenyang", (41.80, 123.43), 4900 * 10000)
 ]
 
 factory_config = [
@@ -129,81 +127,116 @@ factory_config = [
     ("Chengdu", (30.67, 104.06)), ("Beijing", (39.90, 116.40))
 ]
 
-total_weight = sum(w for _, w in city_sales_weight)
-sales_ratio = total_weight / len(city_sales_weight)
-actual_sales_50 = NATIONAL_SALES_TOTAL * sales_ratio
-
+# 初始化集合与字典
 markets, factories, candidates = [], [], []
 locations, city_demand = {}, {}
 
-for c, w in city_sales_weight:
-    city_demand[c] = int(TOTAL_UNITS_NATIONAL * (actual_sales_50 * (w/total_weight) / NATIONAL_SALES_TOTAL))
+# 市场数据（对齐论文需求表）
+for c, demand in PAPER_CITY_DEMAND.items():
+    city_demand[c] = demand
     markets.append(f"M_{c}")
     locations[f"M_{c}"] = city_coords[c]
 
+# 工厂数据
 for c, pos in factory_config:
     factories.append(f"F_{c}")
     locations[f"F_{c}"] = pos
 
+# 回收中心数据
 for c, pos, cost in recycler_config:
     candidates.append(f"R_{c}")
     locations[f"R_{c}"] = pos
 
-fixed_cost = {f"R_{c}": cost * 3000 for c, _, cost in recycler_config}
-demand_base = {f"M_{c}": city_demand[c] for c, _ in city_sales_weight}
-demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}
+# 固定成本（直接使用论文校准值，无额外放大）
+fixed_cost = {f"R_{c}": cost for c, _, cost in recycler_config}
+demand_base = {f"M_{c}": city_demand[c] for c in PAPER_CITY_DEMAND.keys()}
+demand_uncertainty = {k: v * 0.2 for k, v in demand_base.items()}  # 20% 需求波动（论文假设）
 
 # ==========================================
-# 2. Solver Engine (Unchanged)
+# 2. Solver Engine (Aligned with Paper MILP Model)
 # ==========================================
 def get_dist(n1, n2):
+    """计算两点间地理距离（km），对齐论文空间约束"""
     p1, p2 = locations[n1], locations[n2]
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) * 100
 
 def solve_milp(alpha, demand_dict=None, verbose=False):
-    TRANS_COST, CARBON_TAX = 1.6, 65
-    FWD_CARBON_FACTOR, REV_CARBON_FACTOR = 0.0004, 0.0030
-    CARBON_CAP = 100000
-    CAPACITY, MAX_REV_DIST = 80000, 600
+    """
+    修正后的MILP求解器，对齐论文数学模型参数
+    返回：最优状态、总成本、回收中心数量、总碳排放、超额碳排放
+    """
+    # 论文校准核心参数（替换原硬编码偏差值）
+    TRANS_COST = 1.6  # 元/单位·km
+    CARBON_TAX = 65   # 元/吨CO₂
+    FWD_CARBON_FACTOR = 0.004  # 吨CO₂/单位·km（论文正向因子）
+    REV_CARBON_FACTOR = 0.025  # 吨CO₂/单位·km（论文逆向因子）
+    CARBON_CAP = 1500000       # 150万吨CO₂（论文碳配额）
+    CAPACITY = 80000           # 单厂最大处理能力（单位/年，对齐论文）
+    MAX_REV_DIST = 600         # 逆向物流最大半径（km）
 
+    # 初始化MILP问题
     prob = pulp.LpProblem("Bayes_MILP", pulp.LpMinimize)
 
-    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')
-    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')
-    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')
-    excess_e = pulp.LpVariable("ExcessE", 0, cat='Continuous')
+    # 决策变量（对齐论文定义）
+    x = pulp.LpVariable.dicts("Fwd", (factories, markets), 0, cat='Continuous')  # 正向流量
+    z = pulp.LpVariable.dicts("Rev", (markets, candidates), 0, cat='Continuous')  # 逆向流量
+    y = pulp.LpVariable.dicts("Open", candidates, cat='Binary')                   # 回收中心建设决策
+    excess_e = pulp.LpVariable("ExcessE", 0, cat='Continuous')                    # 超额碳排放
 
+    # 成本项（对齐论文目标函数）
     cost_trans = pulp.lpSum([x[i][j]*get_dist(i,j)*TRANS_COST for i in factories for j in markets]) + \
                  pulp.lpSum([z[j][k]*get_dist(j,k)*TRANS_COST for j in markets for k in candidates])
-
     emission = pulp.lpSum([x[i][j]*get_dist(i,j)*FWD_CARBON_FACTOR for i in factories for j in markets]) + \
                pulp.lpSum([z[j][k]*get_dist(j,k)*REV_CARBON_FACTOR for j in markets for k in candidates])
-
     cost_fixed = pulp.lpSum([fixed_cost[k]*y[k] for k in candidates])
 
+    # 目标函数：最小化总成本（固定成本+运输成本+碳税成本）
     prob += cost_fixed + cost_trans + excess_e*CARBON_TAX
-    prob += excess_e >= emission - CARBON_CAP
 
+    # 约束条件（对齐论文模型）
+    prob += excess_e >= emission - CARBON_CAP  # 碳配额约束
     current_demand = demand_dict if demand_dict else demand_base
 
     for j in markets:
+        # 1. 鲁棒需求覆盖约束（1.2倍基础需求 = 基础+20%波动，对齐论文γ=1.0）
         prob += pulp.lpSum([x[i][j] for i in factories]) >= current_demand[j] * 1.2
+        # 2. 回收政策约束（最低回收率α）
         prob += pulp.lpSum([z[j][k] for k in candidates]) >= current_demand[j] * alpha
+        # 3. 地理辐射约束（超600km禁止逆向物流）
         for k in candidates:
-            if get_dist(j, k) > MAX_REV_DIST: prob += z[j][k] == 0
+            if get_dist(j, k) > MAX_REV_DIST:
+                prob += z[j][k] == 0
 
+    # 4. 回收中心容量约束
     for k in candidates:
         prob += pulp.lpSum([z[j][k] for j in markets]) <= CAPACITY * y[k]
 
+    # 求解模型
     status = prob.solve(pulp.PULP_CBC_CMD(msg=verbose))
 
+    # 提取结果（扩展关键指标，保留原格式兼容性）
     if pulp.LpStatus[status] == 'Optimal':
-        return {'status': 'Optimal', 'cost': pulp.value(prob.objective)}
+        recycler_count = sum(1 for k in candidates if pulp.value(y[k]) == 1.0)
+        total_emission = pulp.value(emission)
+        total_excess_e = pulp.value(excess_e)
+        return {
+            'status': 'Optimal',
+            'cost': pulp.value(prob.objective),
+            'recycler_count': recycler_count,
+            'total_emission': total_emission,
+            'excess_emission': total_excess_e
+        }
     else:
-        return {'status': 'Infeasible', 'cost': np.nan}
+        return {
+            'status': 'Infeasible',
+            'cost': np.nan,
+            'recycler_count': np.nan,
+            'total_emission': np.nan,
+            'excess_emission': np.nan
+        }
 
 # ==========================================
-# 3. Bayesian Logic (Unchanged)
+# 3. Bayesian Logic (Unchanged, Keep Original Inference Logic)
 # ==========================================
 class BayesianEngine:
     def __init__(self, true_alpha=0.28):
@@ -259,7 +292,7 @@ class BayesianEngine:
         return np.array(chain)
 
 # ==========================================
-# 4. Execution & Visualization (HEAVILY OPTIMIZED)
+# 4. Execution & Visualization (HEAVILY OPTIMIZED, Keep Original Style)
 # ==========================================
 # A. Run Analysis (Unchanged logic)
 bayes = BayesianEngine(true_alpha=0.28)
