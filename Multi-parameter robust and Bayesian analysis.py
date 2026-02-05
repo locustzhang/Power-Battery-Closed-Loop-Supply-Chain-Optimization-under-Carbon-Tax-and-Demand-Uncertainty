@@ -317,8 +317,8 @@ ax.text(0.03, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
 # 5. 轴和标题美化
 ax.set_xlabel('Total Network Cost ($10^8$ CNY)', fontweight='bold', labelpad=10)
 ax.set_ylabel('Probability Density', fontweight='bold', labelpad=10)
-ax.set_title('Figure 1. Cost Risk Profile: Robust vs. Bayesian', 
-             loc='left', fontsize=14, fontweight='bold', pad=15)
+ax.set_title('Cost Risk Profile: Robust vs. Bayesian',
+             loc='center', fontsize=14, fontweight='bold', pad=15)
 ax.set_ylim(bottom=0)
 ax.legend(loc='upper right', fontsize=10, frameon=False, ncol=1)
 
@@ -379,8 +379,11 @@ for i, (data, base, label, col, fmt) in enumerate(params_data):
     else:
         ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.0f'))
 
-fig2.suptitle('Figure 2. Posterior Distributions of Key Uncertain Parameters', 
-              x=0, ha='left', fontsize=14, fontweight='bold', y=1.05)
+fig2.suptitle('Posterior Distributions of Key Uncertain Parameters',
+              ha='center',  # 显式指定水平居中
+              fontsize=14,
+              fontweight='bold',
+              y=1.06)
 
 plt.savefig("Fig2_Parameters_Publication.png", dpi=600, bbox_inches='tight')
 plt.show()
