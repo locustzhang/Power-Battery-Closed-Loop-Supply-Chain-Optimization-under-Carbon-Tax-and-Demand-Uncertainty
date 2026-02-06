@@ -351,6 +351,8 @@ def plot_bayesian_results(posterior, true_alpha=0.28):
 
     # Setup Figure
     fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+    fig.suptitle('Bayesian Recovery Rate Updating and Predictive Cost Analysis',
+                 fontsize=16, fontweight='bold', y=1.04, color=COLORS['text'])
 
     # ----------------------------
     # Plot 1: Parameter Updating (Left)
